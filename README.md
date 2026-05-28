@@ -49,7 +49,7 @@ douban_group_downloader-main/
 
 ### `douban_private_single.py`
 
-按指定帖子 URL 保存。它会读取 `douban_group_downloader_captcha/config.json` 中的 `single_posts`，适合只保存少量指定帖子。
+按指定帖子 URL 保存。它会读取 `douban_group_downloader_captcha/config.json` 中的 `single_posts`，可以一次放入多个帖子 URL，适合快速、精准地选中并保存你需要的帖子。
 
 输出目录示例：
 
@@ -121,13 +121,21 @@ https://www.douban.com/group/123456/
   "single_posts": [
     {
       "url": "https://www.douban.com/group/topic/123456789/",
-      "title": "帖子标题"
+      "title": "示例帖子一"
+    },
+    {
+      "url": "https://www.douban.com/group/topic/234567890/",
+      "title": "示例帖子二"
+    },
+    {
+      "url": "https://www.douban.com/group/topic/345678901/",
+      "title": "示例帖子三"
     }
   ]
 }
 ```
 
-`url` 是帖子地址，`title` 会用作本地保存目录名。
+`url` 是帖子地址，`title` 会用作本地保存目录名。`single_posts` 里可以放多个帖子对象，脚本会按顺序逐个保存。
 
 ## 使用方法
 
@@ -147,7 +155,7 @@ cd douban_group_downloader_captcha
 python douban_private_single.py
 ```
 
-程序会按 `config.json` 中的帖子列表逐个保存。
+程序会按 `config.json` 中的帖子列表逐个保存。你可以把多个想保存的帖子 URL 都放进 `single_posts`，这样不用保存整个小组，也能快速精准地保存选中的帖子。
 
 ### 先提取 URL，再保存指定帖子
 
@@ -196,7 +204,7 @@ python douban_private_single.py
 
 在 GitHub 仓库页面里点击 `.html` 文件时，GitHub 默认显示源码，不会像网页一样渲染。要在线查看效果，需要使用 GitHub Pages 或其他静态网站服务，并保持 HTML 和 `images/` 文件夹的相对位置不变。
 
-在 VS Code 中查看时，建议直接打开具体的 `1.html`，或者使用 Live Server 之类的本地静态服务打开。
+在本地查看时，可以优先用 VS Code 的 Live Server 打开保存目录；也可以直接打开具体的 `1.html`。
 
 ## 常见问题
 

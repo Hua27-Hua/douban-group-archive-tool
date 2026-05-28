@@ -2,7 +2,15 @@
   "single_posts": [
     {
       "url": "https://www.douban.com/group/topic/123456789/",
-      "title": "帖子标题"
+      "title": "示例帖子一"
+    },
+    {
+      "url": "https://www.douban.com/group/topic/234567890/",
+      "title": "示例帖子二"
+    },
+    {
+      "url": "https://www.douban.com/group/topic/345678901/",
+      "title": "示例帖子三"
     }
   ]
 }
