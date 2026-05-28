@@ -19,18 +19,18 @@
 ```text
 douban_group_downloader-main/
 ├─ douban_group_downloader_qrcode/
-│  ├─ douban_private_spider_qrcode.py   # 按小组批量保存帖子
+│  ├─ download_group.py                 # 按小组批量保存帖子
+│  ├─ extract_urls.py                   # 从小组列表提取帖子 URL，并生成指定帖子配置
 │  └─ config.json                       # 小组批量保存配置
 ├─ douban_group_downloader_captcha/
-│  ├─ douban_private_single.py          # 按指定帖子 URL 保存帖子
-│  ├─ extract_urls.py                   # 从小组列表提取帖子 URL，并生成指定帖子配置
+│  ├─ download_posts.py                 # 按指定帖子 URL 保存帖子
 │  └─ config.json                       # 指定帖子保存配置
 ├─ .gitignore
 ├─ README.md
 └─ requirements.txt
 ```
 
-### `douban_private_spider_qrcode.py`
+### `download_group.py`
 
 按小组批量保存帖子。它会读取 `douban_group_downloader_qrcode/config.json` 中的 `grouplist`，进入小组讨论列表，逐页获取帖子链接并保存内容。
 
@@ -47,7 +47,7 @@ douban_group_downloader-main/
       └─ img_xxx.jpg
 ```
 
-### `douban_private_single.py`
+### `download_posts.py`
 
 按指定帖子 URL 保存。它会读取 `douban_group_downloader_captcha/config.json` 中的 `single_posts`，可以一次放入多个帖子 URL，适合快速、精准地选中并保存你需要的帖子。
 
@@ -63,7 +63,7 @@ single_posts/
 
 ### `extract_urls.py`
 
-辅助指定帖子 URL 使用。它会从小组讨论列表提取帖子 URL，并生成这些文件：
+辅助指定帖子 URL 使用，和 `download_group.py` 放在同一个目录里，共用 `douban_group_downloader_qrcode/config.json` 里的小组配置。它会从小组讨论列表提取帖子 URL，并生成这些文件：
 
 ```text
 小组名_小组ID_urls.txt
@@ -72,7 +72,7 @@ single_posts/
 小组名_小组ID_urls_single_posts_config.json
 ```
 
-其中 `小组名_小组ID_urls_single_posts_config.json` 是给 `douban_private_single.py` 使用的配置格式。你可以把它的内容复制到 `douban_group_downloader_captcha/config.json`，然后运行指定帖子下载脚本。
+其中 `小组名_小组ID_urls_single_posts_config.json` 是给 `download_posts.py` 使用的配置格式。你可以把它的内容复制到 `douban_group_downloader_captcha/config.json`，然后运行指定帖子下载脚本。
 
 ## 环境准备
 
@@ -112,6 +112,25 @@ pip install -r requirements.txt
 https://www.douban.com/group/123456/
 ```
 
+上面这个小组 URL 里，需要填进配置的是 `123456`，不是整条 URL。`groupname` 可以自己取一个容易识别的名字，它会用于本地输出文件夹名。
+
+如果要保存多个小组，可以在 `grouplist` 里继续增加：
+
+```json
+{
+  "grouplist": [
+    {
+      "groupid": "123456",
+      "groupname": "示例小组一"
+    },
+    {
+      "groupid": "234567",
+      "groupname": "示例小组二"
+    }
+  ]
+}
+```
+
 ### 指定帖子保存配置
 
 编辑 `douban_group_downloader_captcha/config.json`：
@@ -143,7 +162,7 @@ https://www.douban.com/group/123456/
 
 ```bash
 cd douban_group_downloader_qrcode
-python douban_private_spider_qrcode.py
+python download_group.py
 ```
 
 程序会打开浏览器。你登录豆瓣后，在命令行按回车继续。
@@ -152,7 +171,7 @@ python douban_private_spider_qrcode.py
 
 ```bash
 cd douban_group_downloader_captcha
-python douban_private_single.py
+python download_posts.py
 ```
 
 程序会按 `config.json` 中的帖子列表逐个保存。你可以把多个想保存的帖子 URL 都放进 `single_posts`，这样不用保存整个小组，也能快速精准地保存选中的帖子。
@@ -162,16 +181,17 @@ python douban_private_single.py
 如果你想先从某个小组整理出帖子 URL，再决定保存哪些帖子，可以运行：
 
 ```bash
-cd douban_group_downloader_captcha
+cd douban_group_downloader_qrcode
 python extract_urls.py
 ```
 
-`extract_urls.py` 会优先读取本目录的 `config.json`；如果这里没有 `grouplist`，会读取 `douban_group_downloader_qrcode/config.json` 里的小组配置。
+`extract_urls.py` 会读取 `douban_group_downloader_qrcode/config.json` 里的 `grouplist`。也就是说，如果你要提取某个小组的帖子 URL，先改这个小组配置，再运行 `extract_urls.py`。
 
 运行完成后，可以打开生成的 `小组名_小组ID_urls_single_posts_config.json`，把里面的内容复制到 `douban_group_downloader_captcha/config.json`，再运行：
 
 ```bash
-python douban_private_single.py
+cd ../douban_group_downloader_captcha
+python download_posts.py
 ```
 
 ## 本地 HTML 和图片
