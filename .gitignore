@@ -10,6 +10,9 @@ __pycache__/
 douban_group_downloader_captcha/single_posts/
 douban_group_downloader_qrcode/*_[0-9]*/
 douban_group_downloader_qrcode/[0-9]*/
+douban_group_downloader_qrcode/*_原版文件/
+douban_group_downloader_qrcode/*_单html*/
+douban_group_downloader_qrcode/*.zip
 douban_group_downloader_qrcode/*_urls.txt
 douban_group_downloader_qrcode/*_urls.json
 douban_group_downloader_qrcode/*_urls.csv
@@ -19,6 +22,9 @@ douban_group_downloader_captcha/*_urls.json
 douban_group_downloader_captcha/*_urls.csv
 douban_group_downloader_captcha/*_single_posts_config.json
 failed_images.jsonl
+single_html_exports/
+_single_html_exports/
+**/_single_html_exports/
 
 # C extensions
 *.so

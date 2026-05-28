@@ -2,7 +2,7 @@
 
 这是一个用于本地保存豆瓣小组帖子的 Python 工具。脚本会通过浏览器登录豆瓣，保存帖子 HTML，下载帖子中的图片，并把页面里的图片地址改成本地路径，方便离线查看或之后放到静态网页服务中查看。
 
-请只保存自己有权限查看的内容，并遵守豆瓣相关规则与内容版权要求。
+请只保存自己有权限查看的内容。
 
 ## 功能
 
@@ -11,8 +11,8 @@
 - 自动下载帖子图片到 `images/` 目录。
 - HTML 中的图片会替换成本地路径。
 - 本地 HTML 支持点击图片放大查看。
-- 下载失败的图片不会保留为裂图，会显示“图片下载失败，点击打开原图”。
 - 下载失败的图片会记录到 `failed_images.jsonl`，方便之后排查或手动补救。
+- 如果普通图片请求失败，爬虫会再尝试用已登录的浏览器兜底读取图片，适合需要账号权限才能查看原图的私密小组。
 
 ## 文件说明
 
@@ -21,10 +21,11 @@ douban_group_downloader-main/
 ├─ douban_group_downloader_qrcode/
 │  ├─ download_group.py                 # 按小组批量保存帖子
 │  ├─ extract_urls.py                   # 从小组列表提取帖子 URL，并生成指定帖子配置
-│  └─ config.json                       # 小组批量保存配置
+│  └─ config.json                       # 小组批量保存配置 运行前必配置
 ├─ douban_group_downloader_captcha/
 │  ├─ download_posts.py                 # 按指定帖子 URL 保存帖子
-│  └─ config.json                       # 指定帖子保存配置
+│  └─ config.json                       # 指定帖子保存配置 
+├─ export_single_html.py                # 把已下载帖子导出为单文件 HTML，推荐爬完帖子追求完美保留个人隐私者必运行
 ├─ .gitignore
 ├─ README.md
 └─ requirements.txt
@@ -34,32 +35,11 @@ douban_group_downloader-main/
 
 按小组批量保存帖子。它会读取 `douban_group_downloader_qrcode/config.json` 中的 `grouplist`，进入小组讨论列表，逐页获取帖子链接并保存内容。
 
-输出目录示例：
-
-```text
-小组名_小组ID/
-└─ 帖子标题/
-   ├─ 1.html
-   ├─ 2.html
-   ├─ meta.json
-   ├─ failed_images.jsonl
-   └─ images/
-      └─ img_xxx.jpg
-```
 
 ### `download_posts.py`
 
 按指定帖子 URL 保存。它会读取 `douban_group_downloader_captcha/config.json` 中的 `single_posts`，可以一次放入多个帖子 URL，适合快速、精准地选中并保存你需要的帖子。
 
-输出目录示例：
-
-```text
-single_posts/
-└─ 帖子标题/
-   ├─ 1.html
-   ├─ meta.json
-   └─ images/
-```
 
 ### `extract_urls.py`
 
@@ -73,6 +53,14 @@ single_posts/
 ```
 
 其中 `小组名_小组ID_urls_single_posts_config.json` 是给 `download_posts.py` 使用的配置格式。你可以把它的内容复制到 `douban_group_downloader_captcha/config.json`，然后运行指定帖子下载脚本。
+
+### `export_single_html.py`
+
+单文件导出工具。它用于爬取完成之后，把已经保存好的 `1.html` 和 `images/` 图片整合成单个 HTML 文件。导出的 HTML 可以直接在资源管理器里双击打开，不再依赖旁边的 `images/` 文件夹。
+
+导出时会移除远程 CSS/JS 依赖，并注入一份简洁的阅读样式。
+
+强烈推荐在爬完帖子后都运行一次这个脚本，把结果整理成更方便长期保存和分享的单文件 HTML。
 
 ## 环境准备
 
@@ -194,6 +182,28 @@ cd ../douban_group_downloader_captcha
 python download_posts.py
 ```
 
+### 导出单文件 HTML
+
+爬取完成后，可以把某个小组目录批量导出为单文件 HTML：缺点是html文件会较大，优点是删去了豆瓣冗余页面功能，后续豆瓣更新页面也不影响现有页面留存。
+
+```bash
+python export_single_html.py douban_group_downloader_qrcode/小组名_小组ID
+```
+
+也可以导出指定帖子保存目录：
+
+```bash
+python export_single_html.py douban_group_downloader_captcha/single_posts
+```
+
+如果是旧存档，原 HTML 里仍有豆瓣远程图片地址，可以让导出工具补下载缺失图片：
+
+```bash
+python export_single_html.py douban_group_downloader_qrcode/小组名_小组ID --fetch-missing
+```
+
+默认会在目标目录下生成 `_single_html_exports/`。导出的每个 HTML 都是独立文件，可以直接双击打开。
+
 ## 本地 HTML 和图片
 
 每个帖子目录中的 HTML 会引用同目录下的 `images/` 文件夹：
@@ -212,17 +222,19 @@ python download_posts.py
 
 ## 上线和查看 HTML
 
-如果把保存结果放到静态网站上，需要打开具体的 HTML 文件，例如：
+推荐在爬完帖子后先运行 `export_single_html.py` 导出单文件 HTML。导出的文件已经嵌入本地图片和阅读样式，可以直接在资源管理器里双击打开，也更适合之后上传到静态网站查看。
+
+如果查看的是未导出的原始保存结果，需要打开具体的 HTML 文件，例如：
 
 ```text
 帖子标题/1.html
 ```
 
-只打开“帖子标题”这个文件夹时，静态网站通常会寻找 `index.html`。如果这个文件夹里没有 `index.html`，页面可能会一直加载或显示目录错误。
+只打开“帖子标题”这个文件夹时，静态网站通常会寻找 `index.html`。如果这个文件夹里没有 `index.html`，页面可能会一直加载或显示目录错误。使用单文件导出后，可以直接打开导出的 HTML 文件，通常不需要再保留旁边的 `images/` 文件夹。
 
 如果希望访问文件夹地址时直接打开第一页，可以把该帖子的 `1.html` 复制或改名为 `index.html`。
 
-在 GitHub 仓库页面里点击 `.html` 文件时，GitHub 默认显示源码，不会像网页一样渲染。要在线查看效果，需要使用 GitHub Pages 或其他静态网站服务，并保持 HTML 和 `images/` 文件夹的相对位置不变。
+在 GitHub 仓库页面里点击 `.html` 文件时，GitHub 默认显示源码，不会像网页一样渲染。要在线查看效果，需要使用 GitHub Pages 或其他静态网站服务。未导出的原始 HTML 需要保持 HTML 和 `images/` 文件夹的相对位置不变；单文件导出的 HTML 已经把图片嵌入文件本身，更适合单独发布。
 
 在本地查看时，可以优先用 VS Code 的 Live Server 打开保存目录；也可以直接打开具体的 `1.html`。
 
@@ -234,8 +246,9 @@ python download_posts.py
 
 ### 可以把 HTML 上线成静态网站吗？
 
-可以。保持每个帖子目录中的 HTML 和 `images/` 文件夹一起上传即可。图片放大功能已经写入 HTML，不依赖后端服务。
-
+可以。分两种情况
+1、未运行export_single_html.py，此状态下爬出的帖子需保持每个帖子目录中的 HTML 和 `images/` 文件夹一起上传。
+2、运行export_single_html.py，将导出的单个html文件上传。
 ## License
 
 This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.

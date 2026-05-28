@@ -3,6 +3,7 @@ import json
 import time
 import re
 import hashlib
+import base64
 import requests
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -349,9 +350,20 @@ def image_url_candidates(img_url):
 
     add_candidate(img_url)
     replacements = [
+        ('/view/richtext/s/', '/view/richtext/large/'),
+        ('/view/richtext/s/', '/view/richtext/raw/'),
+        ('/view/richtext/s/', '/view/richtext/l/'),
+        ('/view/richtext/m/', '/view/richtext/large/'),
+        ('/view/richtext/m/', '/view/richtext/raw/'),
+        ('/view/richtext/l/', '/view/richtext/large/'),
+        ('/view/richtext/l/', '/view/richtext/raw/'),
         ('/view/richtext/large/', '/view/richtext/raw/'),
+        ('/view/richtext/large/', '/view/richtext/l/'),
+        ('/view/richtext/large/', '/view/richtext/s/'),
         ('/view/richtext/large/public/', '/view/richtext/public/'),
         ('/view/richtext/raw/', '/view/richtext/large/'),
+        ('/view/richtext/raw/', '/view/richtext/l/'),
+        ('/view/richtext/raw/', '/view/richtext/s/'),
         ('/view/richtext/raw/public/', '/view/richtext/public/'),
         ('/view/photo/l/public/', '/view/photo/raw/public/'),
         ('/view/photo/m/public/', '/view/photo/l/public/'),
@@ -401,7 +413,79 @@ def write_failed_image(post_dir, page_url, img_url, reason):
         }, ensure_ascii=False) + '\n')
 
 
-def download_image(session, img_url, save_path, referer):
+def save_image_bytes(data, save_path):
+    detected_ext = detect_image_ext(data[:32])
+    if not detected_ext:
+        return ''
+
+    final_path = save_path
+    current_ext = os.path.splitext(save_path)[1].lower()
+    if current_ext != detected_ext:
+        final_path = os.path.splitext(save_path)[0] + detected_ext
+
+    with open(final_path, 'wb') as f:
+        f.write(data)
+    return final_path
+
+
+def download_image_with_browser(driver, img_url, save_path):
+    if not driver:
+        return '', '浏览器不可用'
+
+    original_page = driver.current_url
+    failures = []
+    for candidate_url in image_url_candidates(img_url):
+        try:
+            driver.get(candidate_url)
+            time.sleep(1)
+            result = driver.execute_async_script("""
+                const done = arguments[arguments.length - 1];
+                fetch(window.location.href, { credentials: 'include', cache: 'reload' })
+                  .then(response => {
+                    if (!response.ok) {
+                      throw new Error('状态码 ' + response.status);
+                    }
+                    return response.blob();
+                  })
+                  .then(blob => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => done({ ok: true, data: reader.result });
+                    reader.onerror = () => done({ ok: false, error: '读取图片失败' });
+                    reader.readAsDataURL(blob);
+                  })
+                  .catch(error => done({ ok: false, error: String(error) }));
+            """)
+
+            if not result or not result.get('ok'):
+                failures.append(f"{candidate_url} ({(result or {}).get('error', '浏览器读取失败')})")
+                continue
+
+            data_url = result.get('data', '')
+            if ',' not in data_url or not data_url.startswith('data:image/'):
+                failures.append(f"{candidate_url} (非图片数据)")
+                continue
+
+            image_data = base64.b64decode(data_url.split(',', 1)[1])
+            final_path = save_image_bytes(image_data, save_path)
+            if final_path:
+                try:
+                    driver.get(original_page)
+                except Exception:
+                    pass
+                return final_path, ''
+            failures.append(f"{candidate_url} (非有效图片)")
+        except Exception as e:
+            failures.append(f"{candidate_url} ({str(e)[:80]})")
+
+    try:
+        driver.get(original_page)
+    except Exception:
+        pass
+
+    return '', '; '.join(failures) or '浏览器兜底下载失败'
+
+
+def download_image(session, img_url, save_path, referer, driver=None):
     """下载单张图片"""
     try:
         existing_path = existing_valid_image_path(save_path)
@@ -425,21 +509,20 @@ def download_image(session, img_url, save_path, referer):
                 continue
 
             content_type = response.headers.get('Content-Type', '').lower()
-            detected_ext = detect_image_ext(response.content[:32])
-            if not detected_ext:
+            final_path = save_image_bytes(response.content, save_path)
+            if not final_path:
                 kind = content_type or 'unknown'
                 failures.append(f"{candidate_url} (非图片响应 {kind})")
                 print(f"  ⚠️ 跳过非图片响应 ({kind}): {candidate_url}")
                 continue
 
-            final_path = save_path
-            current_ext = os.path.splitext(save_path)[1].lower()
-            if current_ext != detected_ext:
-                final_path = os.path.splitext(save_path)[0] + detected_ext
-
-            with open(final_path, 'wb') as f:
-                f.write(response.content)
             return final_path, ''
+
+        browser_path, browser_reason = download_image_with_browser(driver, img_url, save_path)
+        if browser_path:
+            return browser_path, ''
+        if browser_reason:
+            failures.append(f"浏览器兜底失败：{browser_reason}")
 
         return '', '; '.join(failures) or '所有候选地址均下载失败'
     except Exception as e:
@@ -448,7 +531,7 @@ def download_image(session, img_url, save_path, referer):
         return '', reason
 
 
-def process_images_in_html(html_content, base_url, post_dir, session):
+def process_images_in_html(html_content, base_url, post_dir, session, driver=None):
     """处理 HTML 中的图片：下载到本地并替换链接"""
     soup = BeautifulSoup(html_content, 'html.parser')
     remove_ad_blocks(soup)
@@ -483,7 +566,7 @@ def process_images_in_html(html_content, base_url, post_dir, session):
         img_filename = image_filename(img_url)
         img_path = os.path.join(images_dir, img_filename)
 
-        saved_path, fail_reason = download_image(session, img_url, img_path, base_url)
+        saved_path, fail_reason = download_image(session, img_url, img_path, base_url, driver=driver)
         if saved_path:
             rewrite_image_tag(img, f"images/{os.path.basename(saved_path)}", img_url)
             downloaded += 1
@@ -516,7 +599,7 @@ def save_single_post(driver, session, post_url, post_dir):
 
             page_source = driver.page_source
 
-            processed_html = process_images_in_html(page_source, link, post_dir, session)
+            processed_html = process_images_in_html(page_source, link, post_dir, session, driver=driver)
 
             html_filename = os.path.join(post_dir, f'{page_count}.html')
             with open(html_filename, 'w', encoding='utf-8') as f:
