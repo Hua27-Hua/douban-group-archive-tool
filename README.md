@@ -2,7 +2,60 @@
 
 这是一个用于本地保存豆瓣小组帖子的 Python 工具。脚本会通过浏览器登录豆瓣，保存帖子 HTML，下载帖子中的图片，并把页面里的图片地址改成本地路径，方便离线查看或之后放到静态网页服务中查看。
 
-请只保存自己有权限查看的内容。
+## 最快使用流程
+
+先安装依赖：
+
+```bash
+pip install -r requirements.txt
+```
+
+### 方式一：保存整个小组
+保存整个小组：改 douban_group_downloader_qrcode/config.json，运行 download_group.py
+
+1. 修改 `douban_group_downloader_qrcode/config.json`，填入要保存的小组 ID 和小组名。
+2. 运行：
+
+```bash
+cd douban_group_downloader_qrcode
+python download_group.py
+```
+
+3. （可选但推荐）爬完后回到项目根目录，导出更适合长期保存的单文件 HTML：
+
+```bash
+cd ..
+python export_single_html.py douban_group_downloader_qrcode/小组名_小组ID
+```
+
+### 方式二：只保存指定帖子
+改 douban_group_downloader_captcha/config.json，运行 download_posts.py
+
+1. 修改 `douban_group_downloader_captcha/config.json`，把要保存的帖子 URL 放进 `single_posts`。
+2. 运行：
+
+```bash
+cd douban_group_downloader_captcha
+python download_posts.py
+```
+
+3. （可选但推荐）爬完后回到项目根目录，导出单文件 HTML：
+
+```bash
+cd ..
+python export_single_html.py douban_group_downloader_captcha/single_posts
+```
+
+### 可选：先提取小组帖子 URL（此办法可指定大量帖子进行保存）
+
+如果想先从一个小组里提取帖子链接，再挑选部分帖子保存：
+
+```bash
+cd douban_group_downloader_qrcode
+python extract_urls.py
+```
+
+它会生成可复制到 `douban_group_downloader_captcha/config.json` 的指定帖子配置。
 
 ## 功能
 
@@ -25,7 +78,7 @@ douban_group_downloader-main/
 ├─ douban_group_downloader_captcha/
 │  ├─ download_posts.py                 # 按指定帖子 URL 保存帖子
 │  └─ config.json                       # 指定帖子保存配置 
-├─ export_single_html.py                # 把已下载帖子导出为单文件 HTML，推荐爬完帖子追求完美保留个人隐私者必运行
+├─ export_single_html.py                # 把已下载帖子导出为单文件 HTML，推荐爬完后运行
 ├─ .gitignore
 ├─ README.md
 └─ requirements.txt
