@@ -655,6 +655,19 @@ def remove_douban_chrome_and_actions(soup):
 
 
 def normalize_archive_layout(soup):
+    for quote in soup.select(".reply-quote-content"):
+        short_content = quote.select_one(".short.ref-content")
+        full_content = quote.select_one(".all.ref-content")
+        if full_content:
+            if short_content:
+                short_content.decompose()
+            full_content.attrs.pop("style", None)
+            classes = [cls for cls in full_content.get("class", []) if cls != "all"]
+            full_content["class"] = classes or ["ref-content"]
+
+        for toggle in quote.select(".toggle-reply"):
+            toggle.decompose()
+
     for tag in soup.select(".comment-photos, .cmt-img-wrapper, .cmt-img"):
         if "style" in tag.attrs:
             del tag.attrs["style"]
