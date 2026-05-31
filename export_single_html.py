@@ -3,6 +3,7 @@ import base64
 import hashlib
 import mimetypes
 import os
+import re
 import sys
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -654,6 +655,13 @@ def remove_douban_chrome_and_actions(soup):
             tag.decompose()
 
 
+def remove_douban_people_links(soup):
+    for link in list(soup.find_all("a", href=True)):
+        href = link.get("href", "").strip()
+        if re.search(r"(^https?://www\.douban\.com/people/|^https?://www\.douban\.com/people$|^/people/)", href):
+            link.unwrap()
+
+
 def normalize_archive_layout(soup):
     for quote in soup.select(".reply-quote-content"):
         short_content = quote.select_one(".short.ref-content")
@@ -817,6 +825,7 @@ def export_html(html_path, output_path, fetch_missing=False):
 
     remove_remote_dependencies(soup)
     remove_douban_chrome_and_actions(soup)
+    remove_douban_people_links(soup)
     normalize_archive_layout(soup)
     embedded, recovered_remote, fetched_remote, skipped_decoration, missing_local = embed_images(
         soup,

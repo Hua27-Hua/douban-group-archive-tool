@@ -144,6 +144,13 @@ def remove_scripts(soup):
         tag.decompose()
 
 
+def remove_douban_people_links(soup):
+    for link in list(soup.find_all('a', href=True)):
+        href = link.get('href', '').strip()
+        if re.search(r'(^https?://www\.douban\.com/people/|^https?://www\.douban\.com/people$|^/people/)', href):
+            link.unwrap()
+
+
 def remove_correct_answer_lines(soup):
     answer_markers = ('正确答案：', '正确答案:')
     block_tags = {'p', 'div', 'li', 'span', 'td', 'blockquote'}
@@ -562,6 +569,7 @@ def process_images_in_html(html_content, base_url, post_dir, session, driver=Non
     soup = BeautifulSoup(html_content, 'html.parser')
     remove_ad_blocks(soup)
     remove_scripts(soup)
+    remove_douban_people_links(soup)
     if filter_correct_answers:
         remove_correct_answer_lines(soup)
     add_local_image_viewer(soup)
