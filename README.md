@@ -21,6 +21,12 @@ cd douban_group_downloader_qrcode
 python download_group.py
 ```
 
+默认会删除帖子问答里的 `正确答案：` 这一行。如果希望保留正确答案行，改用：
+
+```bash
+python download_group.py --keep-correct-answer
+```
+
 3. （可选但推荐）爬完后回到项目根目录，导出更适合长期保存的单文件 HTML：
 
 ```bash
@@ -37,6 +43,12 @@ python export_single_html.py douban_group_downloader_qrcode/小组名_小组ID
 ```bash
 cd douban_group_downloader_captcha
 python download_posts.py
+```
+
+默认会删除帖子问答里的 `正确答案：` 这一行。如果希望保留正确答案行，改用：
+
+```bash
+python download_posts.py --keep-correct-answer
 ```
 
 3. （可选但推荐）爬完后回到项目根目录，导出单文件 HTML：
@@ -64,6 +76,7 @@ python extract_urls.py
 - 自动下载帖子图片到 `images/` 目录。
 - HTML 中的图片会替换成本地路径。
 - 本地 HTML 支持点击图片放大查看。
+- 默认过滤帖子问答里的 `正确答案：` 行；如需保留，可运行脚本时加 `--keep-correct-answer`。
 - 下载失败的图片会记录到 `failed_images.jsonl`，方便之后排查或手动补救。
 - 如果普通图片请求失败，爬虫会再尝试用已登录的浏览器兜底读取图片，适合需要账号权限才能查看原图的私密小组。
 
@@ -88,10 +101,14 @@ douban_group_downloader-main/
 
 按小组批量保存帖子。它会读取 `douban_group_downloader_qrcode/config.json` 中的 `grouplist`，进入小组讨论列表，逐页获取帖子链接并保存内容。
 
+默认会过滤帖子问答里的 `正确答案：` 行；如果希望保留，运行时加 `--keep-correct-answer`。
+
 
 ### `download_posts.py`
 
 按指定帖子 URL 保存。它会读取 `douban_group_downloader_captcha/config.json` 中的 `single_posts`，可以一次放入多个帖子 URL，适合快速、精准地选中并保存你需要的帖子。
+
+默认会过滤帖子问答里的 `正确答案：` 行；如果希望保留，运行时加 `--keep-correct-answer`。
 
 
 ### `extract_urls.py`

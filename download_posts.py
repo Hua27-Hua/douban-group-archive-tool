@@ -4,6 +4,7 @@ import time
 import re
 import hashlib
 import base64
+import argparse
 import requests
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -556,12 +557,13 @@ def download_image(session, img_url, save_path, referer, driver=None):
         return '', reason
 
 
-def process_images_in_html(html_content, base_url, post_dir, session, driver=None):
+def process_images_in_html(html_content, base_url, post_dir, session, driver=None, filter_correct_answers=True):
     """处理 HTML 中的图片：下载到本地并替换链接"""
     soup = BeautifulSoup(html_content, 'html.parser')
     remove_ad_blocks(soup)
     remove_scripts(soup)
-    remove_correct_answer_lines(soup)
+    if filter_correct_answers:
+        remove_correct_answer_lines(soup)
     add_local_image_viewer(soup)
 
     images_dir = os.path.join(post_dir, 'images')
@@ -606,7 +608,7 @@ def process_images_in_html(html_content, base_url, post_dir, session, driver=Non
     return str(soup)
 
 
-def save_single_post(driver, session, post_url, post_dir):
+def save_single_post(driver, session, post_url, post_dir, filter_correct_answers=True):
     """保存单个帖子的所有页面（含图片）"""
     link = post_url
     page_count = 1
@@ -625,7 +627,14 @@ def save_single_post(driver, session, post_url, post_dir):
 
             page_source = driver.page_source
 
-            processed_html = process_images_in_html(page_source, link, post_dir, session, driver=driver)
+            processed_html = process_images_in_html(
+                page_source,
+                link,
+                post_dir,
+                session,
+                driver=driver,
+                filter_correct_answers=filter_correct_answers,
+            )
 
             html_filename = os.path.join(post_dir, f'{page_count}.html')
             with open(html_filename, 'w', encoding='utf-8') as f:
@@ -659,9 +668,21 @@ def save_single_post(driver, session, post_url, post_dir):
 
 def main():
     """主函数"""
+    parser = argparse.ArgumentParser(description='豆瓣指定帖子本地存档工具')
+    parser.add_argument(
+        '--keep-correct-answer',
+        action='store_true',
+        help='保留帖子问答里的“正确答案：”行。默认会删除这些行。',
+    )
+    args = parser.parse_args()
+
     print("\n" + "=" * 60)
     print("豆瓣批量单帖子爬虫")
     print("=" * 60)
+    if args.keep_correct_answer:
+        print("保留问答正确答案行：开启")
+    else:
+        print("过滤问答正确答案行：开启")
 
     # 读取配置文件
     try:
@@ -741,7 +762,13 @@ def main():
                     os.makedirs(post_dir)
 
                 # 保存帖子
-                pages_saved = save_single_post(driver, session, post_url, post_dir)
+                pages_saved = save_single_post(
+                    driver,
+                    session,
+                    post_url,
+                    post_dir,
+                    filter_correct_answers=not args.keep_correct_answer,
+                )
 
                 if pages_saved > 0:
                     print(f"✓ 帖子保存完成，共 {pages_saved} 页")

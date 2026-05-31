@@ -4,6 +4,7 @@ import time
 import re
 import hashlib
 import base64
+import argparse
 import requests
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -558,14 +559,15 @@ def download_image(session, img_url, save_path, referer, driver=None):
         return '', reason
 
 
-def process_images_in_html(html_content, base_url, post_dir, session, driver=None):
+def process_images_in_html(html_content, base_url, post_dir, session, driver=None, filter_correct_answers=True):
     """
     处理 HTML 中的图片：下载到本地并替换链接
     """
     soup = BeautifulSoup(html_content, 'html.parser')
     remove_ad_blocks(soup)
     remove_scripts(soup)
-    remove_correct_answer_lines(soup)
+    if filter_correct_answers:
+        remove_correct_answer_lines(soup)
     add_local_image_viewer(soup)
 
     # 创建图片保存目录
@@ -692,7 +694,7 @@ def get_discussions(driver, groupid, groupname):
     return discussion_urls
 
 
-def save_discussion_with_images(driver, session, discussion_url, post_dir):
+def save_discussion_with_images(driver, session, discussion_url, post_dir, filter_correct_answers=True):
     """保存单个帖子的所有页面（含图片）"""
     link = discussion_url['link']
     title = discussion_url['title']
@@ -717,7 +719,14 @@ def save_discussion_with_images(driver, session, discussion_url, post_dir):
             page_source = driver.page_source
 
             # 处理图片：下载并替换链接
-            processed_html = process_images_in_html(page_source, link, post_dir, session, driver=driver)
+            processed_html = process_images_in_html(
+                page_source,
+                link,
+                post_dir,
+                session,
+                driver=driver,
+                filter_correct_answers=filter_correct_answers,
+            )
 
             # 保存 HTML
             html_filename = os.path.join(post_dir, f'{page_count}.html')
@@ -751,7 +760,7 @@ def save_discussion_with_images(driver, session, discussion_url, post_dir):
     return page_count
 
 
-def save_discussions(driver, groupid, groupname, discussion_urls):
+def save_discussions(driver, groupid, groupname, discussion_urls, filter_correct_answers=True):
     """保存所有讨论帖子的内容（含图片）"""
     group_dir = f'{groupname}_{groupid}'
 
@@ -790,7 +799,13 @@ def save_discussions(driver, groupid, groupname, discussion_urls):
                 os.makedirs(post_dir)
 
             # 保存帖子（含图片）
-            pages_saved = save_discussion_with_images(driver, session, discussion_url, post_dir)
+            pages_saved = save_discussion_with_images(
+                driver,
+                session,
+                discussion_url,
+                post_dir,
+                filter_correct_answers=filter_correct_answers,
+            )
 
             if pages_saved > 0:
                 print(f"✓ 帖子保存完成，共 {pages_saved} 页")
@@ -824,9 +839,21 @@ def save_discussions(driver, groupid, groupname, discussion_urls):
 
 def main():
     """主函数"""
+    parser = argparse.ArgumentParser(description='豆瓣小组帖子本地存档工具')
+    parser.add_argument(
+        '--keep-correct-answer',
+        action='store_true',
+        help='保留帖子问答里的“正确答案：”行。默认会删除这些行。',
+    )
+    args = parser.parse_args()
+
     print("\n" + "=" * 60)
     print("豆瓣小组爬虫 - Selenium 版（含图片下载）")
     print("=" * 60)
+    if args.keep_correct_answer:
+        print("保留问答正确答案行：开启")
+    else:
+        print("过滤问答正确答案行：开启")
 
     # 读取配置文件
     try:
@@ -864,7 +891,13 @@ def main():
                 continue
 
             # 保存帖子（含图片）
-            save_discussions(driver, groupid, groupname, discussion_urls)
+            save_discussions(
+                driver,
+                groupid,
+                groupname,
+                discussion_urls,
+                filter_correct_answers=not args.keep_correct_answer,
+            )
 
         print("\n🎉 所有任务完成！")
 
