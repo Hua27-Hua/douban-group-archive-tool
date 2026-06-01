@@ -128,6 +128,65 @@ def get_session_from_driver(driver):
     return session
 
 
+def expand_folded_comments(driver, max_rounds=5):
+    """尽量展开被折叠的评论，再保存页面源码。"""
+    total_clicked = 0
+    for _ in range(max_rounds):
+        try:
+            clicked = driver.execute_script("""
+                const markers = /(折叠|管理机器人|内容已被)/;
+
+                function isVisible(el) {
+                    const style = window.getComputedStyle(el);
+                    const rect = el.getBoundingClientRect();
+                    return style.display !== 'none'
+                        && style.visibility !== 'hidden'
+                        && rect.width > 0
+                        && rect.height > 0;
+                }
+
+                function shouldClick(el) {
+                    if (!isVisible(el)) {
+                        return false;
+                    }
+                    const text = (el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim();
+                    const title = (el.getAttribute('title') || el.getAttribute('aria-label') || '').trim();
+                    const combined = `${text} ${title}`.trim();
+                    if (!combined.includes('展开')) {
+                        return false;
+                    }
+                    if (markers.test(combined)) {
+                        return true;
+                    }
+                    const block = el.closest('.reply-doc, .comment-item, .topic-reply, li, tr, div');
+                    const blockText = block ? (block.innerText || block.textContent || '') : '';
+                    return combined === '展开' && markers.test(blockText);
+                }
+
+                const candidates = Array.from(document.querySelectorAll('a, button, span, [role="button"], [onclick], .open-reply'));
+                let clicked = 0;
+                for (const el of candidates) {
+                    if (!shouldClick(el)) {
+                        continue;
+                    }
+                    el.scrollIntoView({ block: 'center', inline: 'nearest' });
+                    el.click();
+                    clicked += 1;
+                }
+                return clicked;
+            """)
+        except Exception:
+            break
+
+        if not clicked:
+            break
+        total_clicked += int(clicked)
+        time.sleep(1.2)
+
+    if total_clicked:
+        print(f"  ✓ 已尝试展开 {total_clicked} 条折叠评论")
+
+
 def is_ad_url(url):
     lower_url = url.lower()
     return any(keyword in lower_url for keyword in AD_URL_KEYWORDS)
@@ -168,6 +227,60 @@ def remove_douban_people_links(soup):
         href = link.get('href', '').strip()
         if re.search(r'(^https?://www\.douban\.com/people/|^https?://www\.douban\.com/people$|^/people/)', href):
             link.unwrap()
+
+
+def remove_owner_like_markers(soup):
+    markers = ('楼主赞过', '作者赞过')
+    removable_tags = {'span', 'a', 'em', 'i', 'b', 'strong', 'small'}
+
+    for text_node in list(soup.find_all(string=lambda text: text and any(marker in text for marker in markers))):
+        parent = text_node.parent
+        if not parent or parent.name in ('script', 'style', 'noscript'):
+            continue
+
+        text = str(text_node)
+        for marker in markers:
+            text = text.replace(marker, '')
+
+        if text.strip():
+            text_node.replace_with(text)
+            continue
+
+        if parent.name in removable_tags and any(marker in parent.get_text(' ', strip=True) for marker in markers):
+            parent.decompose()
+        else:
+            text_node.extract()
+
+
+def remove_display_none(style):
+    parts = [
+        part.strip()
+        for part in (style or '').split(';')
+        if part.strip() and not re.match(r'^display\s*:\s*none\s*$', part.strip(), flags=re.I)
+    ]
+    return '; '.join(parts)
+
+
+def reveal_folded_comments(soup):
+    folded_items = list(soup.select('[data-is_folded="True"], [data-is_folded="true"]'))
+    for folded_msg in soup.select('.folded-msg'):
+        parent = folded_msg.find_parent(['li', 'div'])
+        if parent and parent not in folded_items:
+            folded_items.append(parent)
+
+    for item in folded_items:
+        for content in item.select('.reply-content'):
+            style = remove_display_none(content.get('style', ''))
+            if style:
+                content['style'] = style
+            elif content.has_attr('style'):
+                del content['style']
+
+        for tag in item.select('.folded-msg, .reply-folded-reason, .folded-reason, .reply-hidden'):
+            tag.decompose()
+
+        if item.has_attr('data-is_folded'):
+            item['data-is_folded'] = 'False'
 
 
 def remove_correct_answer_lines(soup):
@@ -696,6 +809,8 @@ def process_images_in_html(html_content, base_url, post_dir, session, driver=Non
     remove_ad_blocks(soup)
     remove_scripts(soup)
     remove_douban_people_links(soup)
+    remove_owner_like_markers(soup)
+    reveal_folded_comments(soup)
     if filter_correct_answers:
         remove_correct_answer_lines(soup)
     add_local_image_viewer(soup)
@@ -857,6 +972,7 @@ def save_discussion_with_images(driver, session, discussion_url, post_dir, filte
             )
             time.sleep(2)
 
+            expand_folded_comments(driver)
             # 获取页面源码
             page_source = driver.page_source
 
