@@ -62,6 +62,21 @@ CONTENT_SELECTORS = [
     '#content .article',
     '#content',
 ]
+LIST_TYPES = {
+    'new': {
+        'label': '最新讨论',
+        'url_type': 'new',
+    },
+    'elite': {
+        'label': '精华帖',
+        'url_type': 'elite',
+    },
+    'hot': {
+        'label': '热门讨论',
+        'url_type': 'hot',
+    },
+}
+TOPIC_URL_RE = re.compile(r'https?://www\.douban\.com/group/topic/(\d+)/?')
 
 
 def init_driver():
@@ -69,12 +84,14 @@ def init_driver():
     print("正在初始化浏览器...")
     options = webdriver.ChromeOptions()
     options.add_argument('--disable-blink-features=AutomationControlled')
-    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
     options.add_argument('--disable-gpu')
     options.add_argument('--no-sandbox')
+    options.add_argument('--log-level=3')
+    options.add_argument('--disable-logging')
 
     driver = webdriver.Chrome(
-        service=Service(ChromeDriverManager().install()),
+        service=Service(ChromeDriverManager().install(), log_output=os.devnull),
         options=options
     )
     print("✓ 浏览器初始化完成")
@@ -176,6 +193,109 @@ def remove_correct_answer_lines(soup):
             continue
 
         text_node.replace_with('\n'.join(kept_lines))
+
+
+def clean_topic_url(url):
+    match = TOPIC_URL_RE.search((url or '').strip())
+    if match:
+        return f"https://www.douban.com/group/topic/{match.group(1)}/"
+    return (url or '').strip()
+
+
+def build_group_list_url(groupid, list_type):
+    info = LIST_TYPES.get(list_type, LIST_TYPES['new'])
+    return f"https://www.douban.com/group/{groupid}/discussion?start=0&type={info['url_type']}"
+
+
+def find_tab_url(soup, tab_text):
+    for link in soup.find_all('a', href=True):
+        text = link.get_text(' ', strip=True)
+        if tab_text in text:
+            href = link.get('href', '').strip()
+            if '/group/' in href and ('discussion' in href or 'type=' in href):
+                return urljoin('https://www.douban.com', href)
+    return ''
+
+
+def resolve_first_list_url(driver, groupid, list_type, custom_url=''):
+    if custom_url:
+        return custom_url
+
+    if list_type != 'elite':
+        return build_group_list_url(groupid, list_type)
+
+    discussion_url = f"https://www.douban.com/group/{groupid}/discussion?start=0&type=new"
+    driver.get(discussion_url)
+    time.sleep(2)
+    soup = BeautifulSoup(driver.page_source, 'html.parser')
+    tab_url = find_tab_url(soup, '精华')
+    return tab_url or build_group_list_url(groupid, list_type)
+
+
+def extract_topic_links(soup):
+    link_nodes = []
+    selectors = [
+        "#content table.olt td.title a[href*='/group/topic/']",
+        "table.olt td.title a[href*='/group/topic/']",
+        "#content .article td.title a[href*='/group/topic/']",
+        "#content .article a[href*='/group/topic/']",
+    ]
+    for selector in selectors:
+        link_nodes = soup.select(selector)
+        if link_nodes:
+            break
+
+    if not link_nodes:
+        link_nodes = soup.find_all('a', href=True)
+
+    topics = []
+    seen_ids = set()
+
+    for link_node in link_nodes:
+        href = link_node.get('href', '')
+        match = TOPIC_URL_RE.search(href)
+        if not match:
+            continue
+
+        topic_id = match.group(1)
+        if topic_id in seen_ids:
+            continue
+
+        title = (
+            link_node.get('title')
+            or link_node.get_text(' ', strip=True)
+            or f'topic_{topic_id}'
+        ).strip()
+        if not title:
+            continue
+
+        seen_ids.add(topic_id)
+        topics.append({
+            'link': f"https://www.douban.com/group/topic/{topic_id}/",
+            'title': title,
+        })
+
+    return topics
+
+
+def find_next_url(soup):
+    selectors = [
+        'span.next a',
+        '.paginator .next a',
+        '.paginator a.next',
+        "a[rel='next']",
+    ]
+    for selector in selectors:
+        link = soup.select_one(selector)
+        if link and link.get('href'):
+            return urljoin('https://www.douban.com', link['href'])
+
+    for link in soup.find_all('a', href=True):
+        text = link.get_text(' ', strip=True)
+        if text in ('后页>', '后页', '下一页', '下页'):
+            return urljoin('https://www.douban.com', link['href'])
+
+    return ''
 
 
 def add_local_image_viewer(soup):
@@ -522,48 +642,50 @@ def download_image_with_browser(driver, img_url, save_path):
 
 def download_image(session, img_url, save_path, referer, driver=None):
     """下载单张图片"""
-    try:
-        existing_path = existing_valid_image_path(save_path)
-        if existing_path:
-            return existing_path, ''
+    existing_path = existing_valid_image_path(save_path)
+    if existing_path:
+        return existing_path, ''
 
-        headers = {
-            'Referer': referer,
-            'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-            'Sec-Fetch-Dest': 'image',
-            'Sec-Fetch-Mode': 'no-cors',
-            'Sec-Fetch-Site': 'cross-site',
-        }
-        failures = []
-        for candidate_url in image_url_candidates(img_url):
-            response = session.get(candidate_url, headers=headers, timeout=30, allow_redirects=True)
-            if response.status_code != 200:
-                reason = f"状态码 {response.status_code}"
-                failures.append(f"{candidate_url} ({reason})")
-                print(f"  ⚠️ 图片下载失败 ({reason}): {candidate_url}")
-                continue
+    headers = {
+        'Referer': referer,
+        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        'Sec-Fetch-Dest': 'image',
+        'Sec-Fetch-Mode': 'no-cors',
+        'Sec-Fetch-Site': 'cross-site',
+    }
+    failures = []
+    for candidate_url in image_url_candidates(img_url):
+        try:
+            response = session.get(candidate_url, headers=headers, timeout=(10, 30), allow_redirects=True)
+        except requests.RequestException as e:
+            reason = str(e).splitlines()[0][:120]
+            failures.append(f"{candidate_url} ({reason})")
+            print(f"  ⚠️ 图片候选地址连接失败，继续尝试下一个: {candidate_url}")
+            continue
 
-            content_type = response.headers.get('Content-Type', '').lower()
-            final_path = save_image_bytes(response.content, save_path)
-            if not final_path:
-                kind = content_type or 'unknown'
-                failures.append(f"{candidate_url} (非图片响应 {kind})")
-                print(f"  ⚠️ 跳过非图片响应 ({kind}): {candidate_url}")
-                continue
+        if response.status_code != 200:
+            reason = f"状态码 {response.status_code}"
+            failures.append(f"{candidate_url} ({reason})")
+            print(f"  ⚠️ 图片下载失败 ({reason}): {candidate_url}")
+            continue
 
-            return final_path, ''
+        content_type = response.headers.get('Content-Type', '').lower()
+        final_path = save_image_bytes(response.content, save_path)
+        if not final_path:
+            kind = content_type or 'unknown'
+            failures.append(f"{candidate_url} (非图片响应 {kind})")
+            print(f"  ⚠️ 跳过非图片响应 ({kind}): {candidate_url}")
+            continue
 
-        browser_path, browser_reason = download_image_with_browser(driver, img_url, save_path)
-        if browser_path:
-            return browser_path, ''
-        if browser_reason:
-            failures.append(f"浏览器兜底失败：{browser_reason}")
+        return final_path, ''
 
-        return '', '; '.join(failures) or '所有候选地址均下载失败'
-    except Exception as e:
-        reason = str(e)[:120]
-        print(f"  ⚠️ 图片下载出错: {reason[:50]}")
-        return '', reason
+    browser_path, browser_reason = download_image_with_browser(driver, img_url, save_path)
+    if browser_path:
+        return browser_path, ''
+    if browser_reason:
+        failures.append(f"浏览器兜底失败：{browser_reason}")
+
+    return '', '; '.join(failures) or '所有候选地址均下载失败'
 
 
 def process_images_in_html(html_content, base_url, post_dir, session, driver=None, filter_correct_answers=True):
@@ -626,16 +748,21 @@ def process_images_in_html(html_content, base_url, post_dir, session, driver=Non
     return str(soup)
 
 
-def get_discussions(driver, groupid, groupname):
+def get_discussions(driver, groupid, groupname, list_type='new', custom_url='', max_pages=0):
     """获取小组所有讨论帖子链接"""
     print(f"\n{'=' * 60}")
     print(f"开始获取 {groupname}_{groupid} 小组的帖子列表")
+    list_label = LIST_TYPES.get(list_type, LIST_TYPES['new'])['label']
+    if custom_url:
+        list_label = '自定义列表页'
+    print(f"获取范围：{list_label}")
     print(f"{'=' * 60}")
 
     discussion_urls = []
+    seen_urls = set()
 
     # 访问小组首页
-    group_url = f'https://www.douban.com/group/{groupid}/discussion?start=0&type=new'
+    group_url = resolve_first_list_url(driver, groupid, list_type, custom_url=custom_url)
     driver.get(group_url)
     time.sleep(3)
 
@@ -653,46 +780,53 @@ def get_discussions(driver, groupid, groupname):
 
             # 获取页面源码
             page_source = driver.page_source
+            current_url = driver.current_url
             soup = BeautifulSoup(page_source, 'html.parser')
 
             # 查找所有帖子链接
-            results = soup.find_all('td', attrs={'class': 'title'})
+            results = extract_topic_links(soup)
 
             if not results:
                 print("⚠️ 未找到帖子，可能需要重新登录或已到最后一页")
                 break
 
             page_count = 0
+            duplicate_count = 0
             for result in results:
-                s_result = result.find('a')
-                if s_result:
-                    link = s_result.get('href', '')
-                    title = s_result.get('title', s_result.text.strip())
-                    if link and title:
-                        discussion_urls.append({'link': link, 'title': title})
-                        page_count += 1
+                link = clean_topic_url(result.get('link', ''))
+                title = result.get('title', '').strip()
+                if not link or not title:
+                    continue
+                if link in seen_urls:
+                    duplicate_count += 1
+                    continue
+                seen_urls.add(link)
+                discussion_urls.append({'link': link, 'title': title})
+                page_count += 1
 
-            print(f"✓ 本页获取 {page_count} 个帖子，累计 {len(discussion_urls)} 个")
+            print(
+                f"✓ 本页识别 {len(results)} 个列表 URL，"
+                f"新增 {page_count} 个，重复 {duplicate_count} 个，累计 {len(discussion_urls)} 个"
+            )
+
+            if max_pages and page_num >= max_pages:
+                print(f"✓ 已达到最大页数限制：{max_pages}")
+                break
 
             # 查找下一页按钮
-            next_page = soup.find('span', attrs={'class': 'next'})
-            if not next_page:
+            next_url = find_next_url(soup)
+            if not next_url:
                 print("✓ 已到最后一页")
                 break
 
-            next_link = next_page.find('a')
-            if not next_link:
-                print("✓ 已到最后一页")
+            if next_url == current_url:
+                print("✓ 下一页地址没有变化，停止翻页，避免重复保存")
                 break
 
             # 访问下一页
-            next_url = next_link.get('href')
-            if next_url:
-                driver.get(next_url)
-                time.sleep(3)
-                page_num += 1
-            else:
-                break
+            driver.get(next_url)
+            time.sleep(3)
+            page_num += 1
 
         except Exception as e:
             print(f"⚠️ 获取帖子列表出错: {str(e)}")
@@ -845,6 +979,19 @@ def save_discussions(driver, groupid, groupname, discussion_urls, filter_correct
     print(f"{'=' * 60}")
 
 
+def choose_correct_answer_mode(args):
+    if args.keep_correct_answer:
+        return True
+    if args.filter_correct_answer:
+        return False
+
+    print("\n是否保留帖子问答里的“正确答案：”？")
+    print("1. 不保留，自动删除正确答案（推荐）")
+    print("2. 保留正确答案")
+    choice = input("请输入 1 或 2，直接回车默认 1：").strip()
+    return choice == '2'
+
+
 def main():
     """主函数"""
     parser = argparse.ArgumentParser(description='豆瓣小组帖子本地存档工具')
@@ -853,15 +1000,39 @@ def main():
         action='store_true',
         help='保留帖子问答里的“正确答案：”行。默认会删除这些行。',
     )
+    parser.add_argument(
+        '--filter-correct-answer',
+        action='store_true',
+        help='删除帖子问答里的“正确答案：”行，用于跳过启动时的交互选择。',
+    )
+    parser.add_argument(
+        '--list-type',
+        choices=sorted(LIST_TYPES.keys()),
+        default='new',
+        help='保存范围：new=最新讨论，elite=精华帖，hot=热门讨论。',
+    )
+    parser.add_argument(
+        '--list-url',
+        default='',
+        help='直接指定一个豆瓣小组列表页 URL，例如精华页、搜索结果页或某个分类页。',
+    )
+    parser.add_argument(
+        '--max-pages',
+        type=int,
+        default=0,
+        help='最多获取多少页帖子列表，0 表示一直翻到最后。',
+    )
     args = parser.parse_args()
+    keep_correct_answer = choose_correct_answer_mode(args)
 
     print("\n" + "=" * 60)
     print("豆瓣小组爬虫 - Selenium 版（含图片下载）")
     print("=" * 60)
-    if args.keep_correct_answer:
+    if keep_correct_answer:
         print("保留问答正确答案行：开启")
     else:
         print("过滤问答正确答案行：开启")
+    print(f"保存范围：{LIST_TYPES.get(args.list_type, LIST_TYPES['new'])['label']}")
 
     # 读取配置文件
     try:
@@ -892,7 +1063,14 @@ def main():
             groupname = group['groupname']
 
             # 获取帖子列表
-            discussion_urls = get_discussions(driver, groupid, groupname)
+            discussion_urls = get_discussions(
+                driver,
+                groupid,
+                groupname,
+                list_type=args.list_type,
+                custom_url=args.list_url,
+                max_pages=args.max_pages,
+            )
 
             if not discussion_urls:
                 print(f"⚠️ 小组 {groupname}_{groupid} 没有获取到帖子")
@@ -904,7 +1082,7 @@ def main():
                 groupid,
                 groupname,
                 discussion_urls,
-                filter_correct_answers=not args.keep_correct_answer,
+                filter_correct_answers=not keep_correct_answer,
             )
 
         print("\n🎉 所有任务完成！")

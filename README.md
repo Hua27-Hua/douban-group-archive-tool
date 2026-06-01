@@ -10,6 +10,8 @@
 pip install -r requirements.txt
 ```
 
+可以在 PowerShell/终端里运行命令，也可以在 PyCharm 里打开对应脚本后点击右上角绿色运行按钮。若绿色运行按钮下载图片更稳定，可以优先用 PyCharm 运行。
+
 ### 方式一：保存整个小组
 保存整个小组：改 douban_group_downloader_qrcode/config.json，运行 download_group.py
 
@@ -21,7 +23,9 @@ cd douban_group_downloader_qrcode
 python download_group.py
 ```
 
-默认会删除帖子问答里的 `正确答案：` 这一行。如果希望保留正确答案行，改用：
+运行后会询问是否保留帖子问答里的 `正确答案：`。直接回车默认删除，输入 `2` 会保留。
+
+如果想跳过交互，直接保留正确答案行，可以运行：
 
 ```bash
 python download_group.py --keep-correct-answer
@@ -45,7 +49,9 @@ cd douban_group_downloader_captcha
 python download_posts.py
 ```
 
-默认会删除帖子问答里的 `正确答案：` 这一行。如果希望保留正确答案行，改用：
+运行后会询问是否保留帖子问答里的 `正确答案：`。直接回车默认删除，输入 `2` 会保留。
+
+如果想跳过交互，直接保留正确答案行，可以运行：
 
 ```bash
 python download_posts.py --keep-correct-answer
@@ -67,7 +73,27 @@ cd douban_group_downloader_qrcode
 python extract_urls.py
 ```
 
+运行后可以选择提取范围：最新讨论、精华帖、热门讨论或自定义列表页。
+
+如果只想提取精华帖 URL，也可以直接运行：
+
+```bash
+python extract_urls.py --list-type elite
+```
+
 它会生成可复制到 `douban_group_downloader_captcha/config.json` 的指定帖子配置。
+
+如果提取出来的 URL 太多，可以继续运行筛选脚本，按标题关键词快速挑帖子：
+
+```bash
+python filter_urls.py
+```
+
+例如只筛标题里包含“闲聊楼”或“资源”的帖子：
+
+```bash
+python filter_urls.py --input 小组名_小组ID_urls.json --include "闲聊楼 资源"
+```
 
 ## 功能
 
@@ -77,7 +103,7 @@ python extract_urls.py
 - HTML 中的图片会替换成本地路径。
 - 本地 HTML 支持点击图片放大查看。
 - 保存和导出时会去掉豆瓣用户主页链接，只保留昵称和头像。
-- 默认过滤帖子问答里的 `正确答案：` 行；如需保留，可运行脚本时加 `--keep-correct-answer`。
+- 运行爬取脚本时可以选择是否保留帖子问答里的 `正确答案：` 行；直接回车默认过滤。
 - 下载失败的图片会记录到 `failed_images.jsonl`，方便之后排查或手动补救。
 - 如果普通图片请求失败，爬虫会再尝试用已登录的浏览器兜底读取图片，适合需要账号权限才能查看原图的私密小组。
 
@@ -88,6 +114,7 @@ douban_group_downloader-main/
 ├─ douban_group_downloader_qrcode/
 │  ├─ download_group.py                 # 按小组批量保存帖子
 │  ├─ extract_urls.py                   # 从小组列表提取帖子 URL，并生成指定帖子配置
+│  ├─ filter_urls.py                    # 从 URL 清单里按关键词筛选想保存的帖子
 │  └─ config.json                       # 小组批量保存配置 运行前必配置
 ├─ douban_group_downloader_captcha/
 │  ├─ download_posts.py                 # 按指定帖子 URL 保存帖子
@@ -102,28 +129,75 @@ douban_group_downloader-main/
 
 按小组批量保存帖子。它会读取 `douban_group_downloader_qrcode/config.json` 中的 `grouplist`，进入小组讨论列表，逐页获取帖子链接并保存内容。
 
-默认会过滤帖子问答里的 `正确答案：` 行；如果希望保留，运行时加 `--keep-correct-answer`。
+运行时会询问是否保留帖子问答里的 `正确答案：` 行。直接回车默认过滤，输入 `2` 保留。
+
+如果想跳过交互，可以使用：
+
+```bash
+python download_group.py --keep-correct-answer
+python download_group.py --filter-correct-answer
+```
 
 
 ### `download_posts.py`
 
 按指定帖子 URL 保存。它会读取 `douban_group_downloader_captcha/config.json` 中的 `single_posts`，可以一次放入多个帖子 URL，适合快速、精准地选中并保存你需要的帖子。
 
-默认会过滤帖子问答里的 `正确答案：` 行；如果希望保留，运行时加 `--keep-correct-answer`。
+运行时会询问是否保留帖子问答里的 `正确答案：` 行。直接回车默认过滤，输入 `2` 保留。
+
+如果想跳过交互，可以使用：
+
+```bash
+python download_posts.py --keep-correct-answer
+python download_posts.py --filter-correct-answer
+```
 
 
 ### `extract_urls.py`
 
-辅助指定帖子 URL 使用，和 `download_group.py` 放在同一个目录里，共用 `douban_group_downloader_qrcode/config.json` 里的小组配置。它会从小组讨论列表提取帖子 URL，并生成这些文件：
+辅助指定帖子 URL 使用，和 `download_group.py` 放在同一个目录里，共用 `douban_group_downloader_qrcode/config.json` 里的小组配置。它会从小组讨论列表、精华帖列表或自定义列表页提取帖子 URL。默认只生成 JSON 文件：
 
 ```text
-小组名_小组ID_urls.txt
 小组名_小组ID_urls.json
-小组名_小组ID_urls.csv
 小组名_小组ID_urls_single_posts_config.json
 ```
 
 其中 `小组名_小组ID_urls_single_posts_config.json` 是给 `download_posts.py` 使用的配置格式。你可以把它的内容复制到 `douban_group_downloader_captcha/config.json`，然后运行指定帖子下载脚本。
+
+如果还想额外生成 CSV 或 TXT，运行时加 `--save-extra-formats`。
+
+如果提取的是精华帖，文件名会带上 `_elite`，例如 `小组名_小组ID_elite_urls_single_posts_config.json`，避免覆盖普通讨论列表提取结果。
+
+### `filter_urls.py`
+
+URL 快速筛选工具。先用 `extract_urls.py` 批量提取小组全部帖子 URL，再用这个脚本按标题关键词筛选，适合从几百上千个帖子里快速挑出想保存的内容。
+
+可以直接交互运行：
+
+```bash
+cd douban_group_downloader_qrcode
+python filter_urls.py
+```
+
+也可以用命令直接筛：
+
+```bash
+python filter_urls.py --input 小组名_小组ID_urls.json --include "闲聊楼 资源" --exclude "投票"
+```
+
+`--include` 里的多个关键词默认命中任意一个就会保留。若希望必须同时命中所有关键词，加：
+
+```bash
+python filter_urls.py --input 小组名_小组ID_urls.json --include "书 女性" --mode all
+```
+
+筛选后默认只生成 `*_selected_single_posts_config.json`，把它的内容复制到 `douban_group_downloader_captcha/config.json` 后，就可以运行 `download_posts.py` 精准保存这些帖子。
+
+如果还想额外生成 CSV 或 TXT，运行时加：
+
+```bash
+python filter_urls.py --input 小组名_小组ID_urls.json --include "闲聊楼 资源" --save-extra-formats
+```
 
 ### `export_single_html.py`
 
@@ -217,6 +291,27 @@ https://www.douban.com/group/123456/
 
 ## 使用方法
 
+### 在 PyCharm 里运行
+
+如果你不熟悉命令行，可以直接在 PyCharm 左侧文件栏打开脚本，然后点击右上角绿色运行按钮。
+
+- 保存整个小组：打开 `douban_group_downloader_qrcode/download_group.py`，点击绿色运行按钮。
+- 保存指定帖子：打开 `douban_group_downloader_captcha/download_posts.py`，点击绿色运行按钮。
+- 提取小组 URL：打开 `douban_group_downloader_qrcode/extract_urls.py`，点击绿色运行按钮。
+- 筛选 URL：打开 `douban_group_downloader_qrcode/filter_urls.py`，点击绿色运行按钮。
+- 导出单文件 HTML：打开 `export_single_html.py`，更推荐在终端里带目录参数运行。
+
+爬取脚本运行后会打开浏览器。请在脚本打开的浏览器里登录豆瓣，登录完成后回到 PyCharm 下方运行窗口按回车继续。
+
+如果运行 `download_group.py` 或 `download_posts.py`，程序会询问是否保留问答正确答案：
+
+```text
+1. 不保留，自动删除正确答案（推荐）
+2. 保留正确答案
+```
+
+直接回车默认选择 `1`；如果要保留，输入 `2` 后回车。
+
 ### 批量保存整个小组
 
 ```bash
@@ -226,6 +321,14 @@ python download_group.py
 
 程序会打开浏览器。你登录豆瓣后，在命令行按回车继续。
 
+运行时会询问是否保留问答正确答案。直接回车默认删除；输入 `2` 会保留。
+
+如果只想批量保存该小组的精华帖：
+
+```bash
+python download_group.py --list-type elite
+```
+
 ### 保存指定帖子
 
 ```bash
@@ -234,6 +337,8 @@ python download_posts.py
 ```
 
 程序会按 `config.json` 中的帖子列表逐个保存。你可以把多个想保存的帖子 URL 都放进 `single_posts`，这样不用保存整个小组，也能快速精准地保存选中的帖子。
+
+运行时会询问是否保留问答正确答案。直接回车默认删除；输入 `2` 会保留。
 
 ### 先提取 URL，再保存指定帖子
 
@@ -246,7 +351,31 @@ python extract_urls.py
 
 `extract_urls.py` 会读取 `douban_group_downloader_qrcode/config.json` 里的 `grouplist`。也就是说，如果你要提取某个小组的帖子 URL，先改这个小组配置，再运行 `extract_urls.py`。
 
+如果只想提取精华帖 URL：
+
+```bash
+python extract_urls.py --list-type elite
+```
+
+如果豆瓣页面入口比较特殊，也可以复制浏览器里打开的列表页地址，直接指定：
+
+```bash
+python extract_urls.py --custom-url "https://www.douban.com/group/123456/discussion?start=0&type=elite"
+```
+
 运行完成后，可以打开生成的 `小组名_小组ID_urls_single_posts_config.json`，把里面的内容复制到 `douban_group_downloader_captcha/config.json`，再运行：
+
+如果 URL 太多，可以先筛选：
+
+```bash
+python filter_urls.py
+```
+
+比如只保留标题里包含“闲聊楼”或“资源”的帖子：
+
+```bash
+python filter_urls.py --input 小组名_小组ID_urls.json --include "闲聊楼 资源"
+```
 
 ```bash
 cd ../douban_group_downloader_captcha

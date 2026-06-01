@@ -1,5 +1,7 @@
+import argparse
 import csv
 import json
+import re
 import time
 from pathlib import Path
 from urllib.parse import urljoin, urldefrag
@@ -8,9 +10,28 @@ from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
+from selenium.common.exceptions import InvalidSessionIdException, WebDriverException
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
+
+
+LIST_TYPES = {
+    "new": {
+        "label": "最新讨论",
+        "url_type": "new",
+    },
+    "elite": {
+        "label": "精华帖",
+        "url_type": "elite",
+    },
+    "hot": {
+        "label": "热门讨论",
+        "url_type": "hot",
+    },
+}
+
+TOPIC_URL_RE = re.compile(r"https?://www\.douban\.com/group/topic/(\d+)/?")
 
 
 def init_driver():
@@ -36,6 +57,14 @@ def login(driver):
     time.sleep(3)
     input("登录完成后按回车继续...")
     return True
+
+
+def ensure_driver_alive(driver):
+    try:
+        _ = driver.current_url
+        return True
+    except (InvalidSessionIdException, WebDriverException):
+        return False
 
 
 def read_json(path):
@@ -78,18 +107,123 @@ def load_group_config():
 
 def clean_topic_url(url):
     url, _fragment = urldefrag(url.strip())
+    match = TOPIC_URL_RE.search(url)
+    if match:
+        return f"https://www.douban.com/group/topic/{match.group(1)}/"
     return url
 
 
-def extract_group_urls(driver, groupid, groupname):
+def build_group_list_url(groupid, list_type):
+    info = LIST_TYPES.get(list_type, LIST_TYPES["new"])
+    return f"https://www.douban.com/group/{groupid}/discussion?start=0&type={info['url_type']}"
+
+
+def find_tab_url(soup, tab_text):
+    for link in soup.find_all("a", href=True):
+        text = link.get_text(" ", strip=True)
+        if tab_text in text:
+            href = link.get("href", "").strip()
+            if "/group/" in href and ("discussion" in href or "type=" in href):
+                return urljoin("https://www.douban.com", href)
+    return ""
+
+
+def resolve_first_list_url(driver, groupid, list_type, custom_url=""):
+    if custom_url:
+        return custom_url
+
+    if list_type != "elite":
+        return build_group_list_url(groupid, list_type)
+
+    # 豆瓣精华入口偶尔会变；先从页面上找“精华”标签链接，找不到再用常见参数兜底。
+    discussion_url = f"https://www.douban.com/group/{groupid}/discussion?start=0&type=new"
+    driver.get(discussion_url)
+    time.sleep(2)
+    soup = BeautifulSoup(driver.page_source, "html.parser")
+    tab_url = find_tab_url(soup, "精华")
+    return tab_url or build_group_list_url(groupid, list_type)
+
+
+def extract_topic_links(soup):
+    link_nodes = []
+    selectors = [
+        "#content table.olt td.title a[href*='/group/topic/']",
+        "table.olt td.title a[href*='/group/topic/']",
+        "#content .article td.title a[href*='/group/topic/']",
+        "#content .article a[href*='/group/topic/']",
+    ]
+    for selector in selectors:
+        link_nodes = soup.select(selector)
+        if link_nodes:
+            break
+
+    if not link_nodes:
+        # 兜底：页面结构变了才扫全页，避免平时把侧栏/推荐区的帖子链接混进列表。
+        link_nodes = soup.find_all("a", href=True)
+
+    topics = []
+    seen_ids = set()
+
+    for link_node in link_nodes:
+        href = link_node.get("href", "")
+        match = TOPIC_URL_RE.search(href)
+        if not match:
+            continue
+
+        topic_id = match.group(1)
+        if topic_id in seen_ids:
+            continue
+
+        title = (
+            link_node.get("title")
+            or link_node.get_text(" ", strip=True)
+            or f"topic_{topic_id}"
+        ).strip()
+        if not title:
+            continue
+
+        seen_ids.add(topic_id)
+        topics.append({
+            "url": f"https://www.douban.com/group/topic/{topic_id}/",
+            "title": title,
+        })
+
+    return topics
+
+
+def find_next_url(soup):
+    selectors = [
+        "span.next a",
+        ".paginator .next a",
+        ".paginator a.next",
+        "a[rel='next']",
+    ]
+    for selector in selectors:
+        link = soup.select_one(selector)
+        if link and link.get("href"):
+            return urljoin("https://www.douban.com", link["href"])
+
+    for link in soup.find_all("a", href=True):
+        text = link.get_text(" ", strip=True)
+        if text in ("后页>", "后页", "下一页", "下页"):
+            return urljoin("https://www.douban.com", link["href"])
+
+    return ""
+
+
+def extract_group_urls(driver, groupid, groupname, list_type="new", custom_url="", max_pages=0):
     """Extract all visible topic URLs from a Douban group discussion list."""
     print("\n" + "=" * 60)
+    list_label = LIST_TYPES.get(list_type, LIST_TYPES["new"])["label"]
+    if custom_url:
+        list_label = "自定义列表页"
     print(f"开始提取 {groupname}_{groupid} 小组的帖子 URL")
+    print(f"提取范围：{list_label}")
     print("=" * 60)
 
     seen_urls = set()
     all_urls = []
-    group_url = f"https://www.douban.com/group/{groupid}/discussion?start=0&type=new"
+    group_url = resolve_first_list_url(driver, groupid, list_type, custom_url=custom_url)
     driver.get(group_url)
     time.sleep(3)
 
@@ -104,40 +238,50 @@ def extract_group_urls(driver, groupid, groupname):
             )
             time.sleep(2)
 
+            current_url = driver.current_url
             soup = BeautifulSoup(driver.page_source, "html.parser")
-            results = soup.find_all("td", class_="title")
+            results = extract_topic_links(soup)
 
             if not results:
                 print("没有找到帖子列表，可能需要重新登录或检查小组权限。")
                 break
 
             page_count = 0
+            duplicate_count = 0
             for result in results:
-                link_node = result.find("a")
-                if not link_node:
+                link = clean_topic_url(result["url"])
+                title = result["title"]
+
+                if not link or not title:
                     continue
 
-                link = clean_topic_url(link_node.get("href", ""))
-                title = link_node.get("title") or link_node.get_text(strip=True)
-
-                if not link or not title or link in seen_urls:
+                if link in seen_urls:
+                    duplicate_count += 1
                     continue
 
                 seen_urls.add(link)
                 all_urls.append({"url": link, "title": title.strip()})
                 page_count += 1
 
-            print(f"本页提取 {page_count} 个 URL，累计 {len(all_urls)} 个")
+            print(
+                f"本页识别 {len(results)} 个列表 URL，"
+                f"新增 {page_count} 个，重复 {duplicate_count} 个，累计 {len(all_urls)} 个"
+            )
 
-            next_page = soup.find("span", class_="next")
-            next_link = next_page.find("a") if next_page else None
-            next_url = next_link.get("href") if next_link else ""
+            if max_pages and page_num >= max_pages:
+                print(f"已达到最大页数限制：{max_pages}")
+                break
 
+            next_url = find_next_url(soup)
             if not next_url:
                 print("已经到最后一页")
                 break
 
-            driver.get(urljoin("https://www.douban.com", next_url))
+            if next_url == current_url:
+                print("下一页地址没有变化，停止翻页，避免重复提取。")
+                break
+
+            driver.get(next_url)
             time.sleep(3)
             page_num += 1
 
@@ -149,33 +293,64 @@ def extract_group_urls(driver, groupid, groupname):
     return all_urls
 
 
+def choose_list_type(args):
+    if args.custom_url:
+        return "new", args.custom_url
+
+    if args.list_type:
+        return args.list_type, ""
+
+    print("\n请选择要提取的帖子范围：")
+    print("1. 最新讨论 / 全部列表")
+    print("2. 精华帖")
+    print("3. 热门讨论")
+    print("4. 自定义列表页 URL")
+    choice = input("请输入 1-4，直接回车默认 1：").strip()
+
+    if choice == "2":
+        return "elite", ""
+    if choice == "3":
+        return "hot", ""
+    if choice == "4":
+        custom_url = input("请粘贴豆瓣小组列表页 URL：").strip()
+        return "new", custom_url
+    return "new", ""
+
+
 def safe_name(value):
     unsafe_chars = '<>:"/\\|?*'
     result = "".join("_" if char in unsafe_chars else char for char in value).strip()
     return result or "douban_group"
 
 
-def save_urls(urls, groupname, groupid):
+def save_urls(urls, groupname, groupid, list_type="new", custom_url="", save_extra_formats=False):
     """Save URLs and generate a config file for douban_private_single.py."""
-    base_name = f"{safe_name(groupname)}_{groupid}_urls"
-
-    txt_file = Path(f"{base_name}.txt")
-    with txt_file.open("w", encoding="utf-8") as file:
-        for item in urls:
-            file.write(item["url"] + "\n")
-    print(f"已保存 URL 文本：{txt_file}")
+    suffix = "custom" if custom_url else list_type
+    if suffix == "new":
+        base_name = f"{safe_name(groupname)}_{groupid}_urls"
+    else:
+        base_name = f"{safe_name(groupname)}_{groupid}_{suffix}_urls"
 
     json_file = Path(f"{base_name}.json")
     with json_file.open("w", encoding="utf-8") as file:
         json.dump(urls, file, ensure_ascii=False, indent=2)
     print(f"已保存 URL 明细：{json_file}")
 
-    csv_file = Path(f"{base_name}.csv")
-    with csv_file.open("w", encoding="utf-8-sig", newline="") as file:
-        writer = csv.DictWriter(file, fieldnames=["title", "url"])
-        writer.writeheader()
-        writer.writerows(urls)
-    print(f"已保存表格文件：{csv_file}")
+    txt_file = None
+    csv_file = None
+    if save_extra_formats:
+        txt_file = Path(f"{base_name}.txt")
+        with txt_file.open("w", encoding="utf-8") as file:
+            for item in urls:
+                file.write(item["url"] + "\n")
+        print(f"已保存 URL 文本：{txt_file}")
+
+        csv_file = Path(f"{base_name}.csv")
+        with csv_file.open("w", encoding="utf-8-sig", newline="") as file:
+            writer = csv.DictWriter(file, fieldnames=["title", "url"])
+            writer.writeheader()
+            writer.writerows(urls)
+        print(f"已保存表格文件：{csv_file}")
 
     single_config_file = Path(f"{base_name}_single_posts_config.json")
     with single_config_file.open("w", encoding="utf-8") as file:
@@ -191,6 +366,31 @@ def save_urls(urls, groupname, groupid):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="豆瓣小组 URL 提取器")
+    parser.add_argument(
+        "--list-type",
+        choices=sorted(LIST_TYPES.keys()),
+        default="",
+        help="提取范围：new=最新讨论，elite=精华帖，hot=热门讨论。不填则启动时手动选择。",
+    )
+    parser.add_argument(
+        "--custom-url",
+        default="",
+        help="直接指定一个豆瓣小组列表页 URL，例如精华页、搜索结果页或某个分类页。",
+    )
+    parser.add_argument(
+        "--max-pages",
+        type=int,
+        default=0,
+        help="最多提取多少页，0 表示一直翻到最后。",
+    )
+    parser.add_argument(
+        "--save-extra-formats",
+        action="store_true",
+        help="额外生成 .csv 和 .txt。默认只生成 JSON。",
+    )
+    args = parser.parse_args()
+
     print("\n" + "=" * 60)
     print("豆瓣小组 URL 提取器 - 生成指定帖子下载配置")
     print("=" * 60)
@@ -205,6 +405,16 @@ def main():
 
     try:
         login(driver)
+        if not ensure_driver_alive(driver):
+            print("\n浏览器已经关闭或断开连接。")
+            print("请重新运行脚本；登录后不要关闭脚本打开的 Chrome 窗口，直接回到终端按回车即可。")
+            return
+
+        list_type, custom_url = choose_list_type(args)
+        if not ensure_driver_alive(driver):
+            print("\n浏览器已经关闭或断开连接。")
+            print("请重新运行脚本；选择提取范围时也要保持 Chrome 窗口打开。")
+            return
 
         for group in groups:
             groupid = str(group.get("groupid", "")).strip()
@@ -214,12 +424,26 @@ def main():
                 print("跳过一条不完整的小组配置。")
                 continue
 
-            urls = extract_group_urls(driver, groupid, groupname)
+            urls = extract_group_urls(
+                driver,
+                groupid,
+                groupname,
+                list_type=list_type,
+                custom_url=custom_url,
+                max_pages=args.max_pages,
+            )
 
             if not urls:
                 continue
 
-            files = save_urls(urls, groupname, groupid)
+            files = save_urls(
+                urls,
+                groupname,
+                groupid,
+                list_type=list_type,
+                custom_url=custom_url,
+                save_extra_formats=args.save_extra_formats,
+            )
             print("\n" + "=" * 60)
             print("提取完成")
             print(f"共 {len(urls)} 个帖子")
@@ -235,7 +459,10 @@ def main():
             input("\n按回车关闭浏览器...")
         except EOFError:
             pass
-        driver.quit()
+        try:
+            driver.quit()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

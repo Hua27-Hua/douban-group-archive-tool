@@ -69,12 +69,14 @@ def init_driver():
     print("正在初始化浏览器...")
     options = webdriver.ChromeOptions()
     options.add_argument('--disable-blink-features=AutomationControlled')
-    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
     options.add_argument('--disable-gpu')
     options.add_argument('--no-sandbox')
+    options.add_argument('--log-level=3')
+    options.add_argument('--disable-logging')
 
     driver = webdriver.Chrome(
-        service=Service(ChromeDriverManager().install()),
+        service=Service(ChromeDriverManager().install(), log_output=os.devnull),
         options=options
     )
     print("✓ 浏览器初始化完成")
@@ -520,48 +522,50 @@ def download_image_with_browser(driver, img_url, save_path):
 
 def download_image(session, img_url, save_path, referer, driver=None):
     """下载单张图片"""
-    try:
-        existing_path = existing_valid_image_path(save_path)
-        if existing_path:
-            return existing_path, ''
+    existing_path = existing_valid_image_path(save_path)
+    if existing_path:
+        return existing_path, ''
 
-        headers = {
-            'Referer': referer,
-            'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-            'Sec-Fetch-Dest': 'image',
-            'Sec-Fetch-Mode': 'no-cors',
-            'Sec-Fetch-Site': 'cross-site',
-        }
-        failures = []
-        for candidate_url in image_url_candidates(img_url):
-            response = session.get(candidate_url, headers=headers, timeout=30, allow_redirects=True)
-            if response.status_code != 200:
-                reason = f"状态码 {response.status_code}"
-                failures.append(f"{candidate_url} ({reason})")
-                print(f"  ⚠️ 图片下载失败 ({reason}): {candidate_url}")
-                continue
+    headers = {
+        'Referer': referer,
+        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        'Sec-Fetch-Dest': 'image',
+        'Sec-Fetch-Mode': 'no-cors',
+        'Sec-Fetch-Site': 'cross-site',
+    }
+    failures = []
+    for candidate_url in image_url_candidates(img_url):
+        try:
+            response = session.get(candidate_url, headers=headers, timeout=(10, 30), allow_redirects=True)
+        except requests.RequestException as e:
+            reason = str(e).splitlines()[0][:120]
+            failures.append(f"{candidate_url} ({reason})")
+            print(f"  ⚠️ 图片候选地址连接失败，继续尝试下一个: {candidate_url}")
+            continue
 
-            content_type = response.headers.get('Content-Type', '').lower()
-            final_path = save_image_bytes(response.content, save_path)
-            if not final_path:
-                kind = content_type or 'unknown'
-                failures.append(f"{candidate_url} (非图片响应 {kind})")
-                print(f"  ⚠️ 跳过非图片响应 ({kind}): {candidate_url}")
-                continue
+        if response.status_code != 200:
+            reason = f"状态码 {response.status_code}"
+            failures.append(f"{candidate_url} ({reason})")
+            print(f"  ⚠️ 图片下载失败 ({reason}): {candidate_url}")
+            continue
 
-            return final_path, ''
+        content_type = response.headers.get('Content-Type', '').lower()
+        final_path = save_image_bytes(response.content, save_path)
+        if not final_path:
+            kind = content_type or 'unknown'
+            failures.append(f"{candidate_url} (非图片响应 {kind})")
+            print(f"  ⚠️ 跳过非图片响应 ({kind}): {candidate_url}")
+            continue
 
-        browser_path, browser_reason = download_image_with_browser(driver, img_url, save_path)
-        if browser_path:
-            return browser_path, ''
-        if browser_reason:
-            failures.append(f"浏览器兜底失败：{browser_reason}")
+        return final_path, ''
 
-        return '', '; '.join(failures) or '所有候选地址均下载失败'
-    except Exception as e:
-        reason = str(e)[:120]
-        print(f"  ⚠️ 图片下载出错: {reason[:50]}")
-        return '', reason
+    browser_path, browser_reason = download_image_with_browser(driver, img_url, save_path)
+    if browser_path:
+        return browser_path, ''
+    if browser_reason:
+        failures.append(f"浏览器兜底失败：{browser_reason}")
+
+    return '', '; '.join(failures) or '所有候选地址均下载失败'
 
 
 def process_images_in_html(html_content, base_url, post_dir, session, driver=None, filter_correct_answers=True):
@@ -674,6 +678,19 @@ def save_single_post(driver, session, post_url, post_dir, filter_correct_answers
     return page_count
 
 
+def choose_correct_answer_mode(args):
+    if args.keep_correct_answer:
+        return True
+    if args.filter_correct_answer:
+        return False
+
+    print("\n是否保留帖子问答里的“正确答案：”？")
+    print("1. 不保留，自动删除正确答案（推荐）")
+    print("2. 保留正确答案")
+    choice = input("请输入 1 或 2，直接回车默认 1：").strip()
+    return choice == '2'
+
+
 def main():
     """主函数"""
     parser = argparse.ArgumentParser(description='豆瓣指定帖子本地存档工具')
@@ -682,12 +699,18 @@ def main():
         action='store_true',
         help='保留帖子问答里的“正确答案：”行。默认会删除这些行。',
     )
+    parser.add_argument(
+        '--filter-correct-answer',
+        action='store_true',
+        help='删除帖子问答里的“正确答案：”行，用于跳过启动时的交互选择。',
+    )
     args = parser.parse_args()
+    keep_correct_answer = choose_correct_answer_mode(args)
 
     print("\n" + "=" * 60)
     print("豆瓣批量单帖子爬虫")
     print("=" * 60)
-    if args.keep_correct_answer:
+    if keep_correct_answer:
         print("保留问答正确答案行：开启")
     else:
         print("过滤问答正确答案行：开启")
@@ -775,7 +798,7 @@ def main():
                     session,
                     post_url,
                     post_dir,
-                    filter_correct_answers=not args.keep_correct_answer,
+                    filter_correct_answers=not keep_correct_answer,
                 )
 
                 if pages_saved > 0:
