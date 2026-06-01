@@ -10,10 +10,10 @@
 pip install -r requirements.txt
 ```
 
-可以在 PowerShell/终端里运行命令，也可以在 PyCharm 里打开对应脚本后点击右上角绿色运行按钮。若绿色运行按钮下载图片更稳定，可以优先用 PyCharm 运行。
+所有脚本都可以也可以直接在 PyCharm 里打开对应脚本后点击右上角绿色运行按钮(推荐，更简单)，也可以参考下列命令行代码，在 PowerShell/终端里运行命令。
 
 ### 方式一：保存整个小组
-保存整个小组：改 douban_group_downloader_qrcode/config.json，运行 download_group.py
+保存整个小组：改 douban_group_downloader_qrcode/config.json，点击绿色运行按钮,运行 download_group.py
 
 1. 修改 `douban_group_downloader_qrcode/config.json`，填入要保存的小组 ID 和小组名。
 2. 运行：
@@ -39,7 +39,7 @@ python export_single_html.py douban_group_downloader_qrcode/小组名_小组ID
 ```
 
 ### 方式二：只保存指定帖子
-改 douban_group_downloader_captcha/config.json，运行 download_posts.py
+改 douban_group_downloader_captcha/config.json，点击绿色运行按钮,运行 download_posts.py  
 
 1. 修改 `douban_group_downloader_captcha/config.json`，把要保存的帖子 URL 放进 `single_posts`。
 2. 运行：
