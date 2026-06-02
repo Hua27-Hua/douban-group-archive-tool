@@ -6,6 +6,12 @@ __pycache__/
 # IDE / local project files
 .idea/
 
+# Local browser driver fallback. Users may place this file locally, but do not upload it.
+chromedriver.exe
+chromedriver
+drivers/chromedriver.exe
+drivers/chromedriver
+
 # Downloaded Douban archives and generated exports
 douban_group_downloader_captcha/single_posts/
 douban_group_downloader_qrcode/*_[0-9]*/

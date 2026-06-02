@@ -85,6 +85,8 @@ python douban_group_downloader_captcha/download_posts.py
 - Chrome 浏览器
 - PyCharm，推荐但不是必须
 
+一般不需要单独安装 ChromeDriver。脚本会先找项目里的 `chromedriver.exe`，找不到时再自动下载匹配版本。
+
 安装依赖：
 
 ```bash
@@ -92,6 +94,8 @@ pip install -r requirements.txt
 ```
 
 如果你不知道在哪里输入这行命令，可以在 PyCharm 下方打开 Terminal/终端，粘贴后回车。
+
+如果运行时卡在“正在初始化浏览器”，或者提示 ChromeDriver 下载失败，可以手动下载和自己 Chrome 大版本匹配的 `chromedriver.exe`，放到项目根目录。放好后重新运行脚本即可。
 
 ### 2. 保存整个小组
 
@@ -367,6 +371,20 @@ export_single_html.py
 ### 图片没有显示怎么办？
 
 少数图片可能因为豆瓣权限、网络或图片地址失效而下载失败。可以重新运行一次，或者爬完后用 `export_single_html.py` 导出单文件 HTML 再查看。
+
+### 启动浏览器时 ChromeDriver 下载失败怎么办？
+
+这通常不是 `config.json` 的问题，而是程序启动 Selenium 浏览器时需要 ChromeDriver。如果网络连不上 ChromeDriver 下载地址，就会失败。
+
+解决办法：
+
+1. 先确认电脑已经安装 Chrome 浏览器。
+2. 重新运行一次，有时只是临时网络失败。
+3. 如果一直失败，可以手动下载和自己 Chrome 大版本匹配的 `chromedriver.exe`。
+4. 把 `chromedriver.exe` 放到项目根目录，也就是和 `README.md` 同一层。
+5. 再重新运行脚本。
+
+不要把 `chromedriver.exe` 上传到 GitHub。它只是每个人电脑本地使用的备用文件。
 
 ### GitHub 上点 HTML 为什么不是网页？
 

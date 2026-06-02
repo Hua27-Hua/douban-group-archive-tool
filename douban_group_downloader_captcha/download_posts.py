@@ -65,6 +65,38 @@ CONTENT_SELECTORS = [
 ]
 
 
+def find_local_chromedriver():
+    """优先使用用户放在本地的 ChromeDriver，避免网络不好时自动下载失败。"""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_dir = os.path.dirname(script_dir)
+    search_dirs = [
+        os.getcwd(),
+        script_dir,
+        project_dir,
+        os.path.join(os.getcwd(), 'drivers'),
+        os.path.join(script_dir, 'drivers'),
+        os.path.join(project_dir, 'drivers'),
+    ]
+    names = ['chromedriver.exe', 'chromedriver']
+
+    for folder in search_dirs:
+        for name in names:
+            path = os.path.join(folder, name)
+            if os.path.isfile(path):
+                return path
+    return ''
+
+
+def build_chrome_service():
+    local_driver = find_local_chromedriver()
+    if local_driver:
+        print(f"✓ 使用本地 ChromeDriver: {local_driver}")
+        return Service(local_driver, log_output=os.devnull)
+
+    print("未找到本地 chromedriver.exe，尝试自动下载匹配版本...")
+    return Service(ChromeDriverManager().install(), log_output=os.devnull)
+
+
 def init_driver():
     """初始化浏览器驱动"""
     print("正在初始化浏览器...")
@@ -77,7 +109,7 @@ def init_driver():
     options.add_argument('--disable-logging')
 
     driver = webdriver.Chrome(
-        service=Service(ChromeDriverManager().install(), log_output=os.devnull),
+        service=build_chrome_service(),
         options=options
     )
     print("✓ 浏览器初始化完成")
