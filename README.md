@@ -354,6 +354,77 @@ export_single_html.py
 
 本地查看时，可以直接双击 HTML，也可以用 VS Code 的 Live Server 打开保存目录。
 
+## 后续怎么做成网站
+
+爬取完成后，保存下来的内容本质上是一批静态 HTML 文件。你可以把它们整理成一个小网站，再放到 GitHub、Vercel 或 GitHub Pages 上。
+
+推荐先运行：
+
+```bash
+python export_single_html.py douban_group_downloader_qrcode/小组名_小组ID
+```
+
+或者：
+
+```bash
+python export_single_html.py douban_group_downloader_captcha/single_posts
+```
+
+这样每个帖子都会变成一个独立的单文件 HTML，更适合长期保存和上线。
+
+### 整理网站文件夹
+
+可以新建一个文件夹，比如：
+
+```text
+site/
+```
+
+然后把导出的 HTML 文件放进去，按你喜欢的方式整理：
+
+```text
+site/
+├─ index.html
+├─ 闲聊楼.html
+├─ 资源整理.html
+└─ 精华帖/
+   ├─ 帖子一.html
+   └─ 帖子二.html
+```
+
+`index.html` 是首页，可以放标题、说明和帖子链接。不会写首页也没关系，可以把你的目录结构和想要的说明发给 AI，让它帮你生成一个简单的 `index.html` 导航页。
+
+### 本地预览
+
+进入 `site/` 文件夹后，可以在终端运行：
+
+```bash
+python -m http.server 8000
+```
+
+然后在浏览器打开：
+
+```text
+http://localhost:8000
+```
+
+这样可以先在自己电脑上检查首页和帖子链接是否正常。
+
+### 上传到 GitHub 后发布
+
+如果想让别人通过网址访问，可以把 `site/` 里的内容上传到一个新的 GitHub 仓库。
+
+常见做法：
+
+1. 新建一个 GitHub 仓库。
+2. 把 `site/` 里的 `index.html` 和帖子 HTML 上传进去。
+3. 用 Vercel 导入这个 GitHub 仓库。
+4. Vercel 会自动读取仓库里的静态文件并生成网站地址。
+
+也可以使用 GitHub Pages 发布。GitHub Pages 和 Vercel 都适合这种静态 HTML 网站。
+
+只发布你确认可以公开展示的内容。如果只是私人存档，也可以只保存在自己电脑里，不一定要上线。
+
 ## 常见问题
 
 ### 运行时要不要关闭浏览器？
