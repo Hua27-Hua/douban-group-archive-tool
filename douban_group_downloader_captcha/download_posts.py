@@ -324,6 +324,50 @@ def remove_correct_answer_lines(soup):
         text_node.replace_with('\n'.join(kept_lines))
 
 
+def remove_visibility_warning_lines(soup):
+    warning_markers = (
+        '含有违规或引发不良讨论的内容，内容仅自己可见，请勿发布同类信息',
+        '含有违规或引发不良讨论的内容, 内容仅自己可见, 请勿发布同类信息',
+    )
+    block_tags = {'p', 'div', 'li', 'span', 'td', 'blockquote'}
+
+    for text_node in list(soup.find_all(string=lambda text: text and any(marker in text for marker in warning_markers))):
+        parent = text_node.parent
+        if not parent or parent.name in ('script', 'style', 'noscript'):
+            continue
+
+        original_text = str(text_node)
+        kept_lines = [
+            line for line in original_text.splitlines()
+            if not any(marker in line for marker in warning_markers)
+        ]
+
+        if not kept_lines:
+            if parent.name in block_tags and parent.get_text(strip=True) == original_text.strip():
+                parent.decompose()
+            else:
+                text_node.extract()
+            continue
+
+        text_node.replace_with('\n'.join(kept_lines))
+
+
+def remove_poll_personal_markers(soup):
+    selected_markers = ('（已选）', '(已选)', '（我已选）', '(我已选)')
+
+    for text_node in list(soup.find_all(string=lambda text: text and any(marker in text for marker in selected_markers))):
+        cleaned = str(text_node)
+        for marker in selected_markers:
+            cleaned = cleaned.replace(marker, '')
+        text_node.replace_with(cleaned)
+
+    for tag in list(soup.find_all(['button', 'input', 'a', 'span'])):
+        text = tag.get_text(' ', strip=True)
+        value = tag.get('value', '')
+        if text in {'已投票', '投票', '提交投票', '我要投票'} or value in {'已投票', '投票', '提交投票', '我要投票'}:
+            tag.decompose()
+
+
 def add_local_image_viewer(soup):
     css = """
 img[src] {
@@ -721,6 +765,8 @@ def process_images_in_html(html_content, base_url, post_dir, session, driver=Non
     remove_scripts(soup)
     remove_douban_people_links(soup)
     remove_owner_like_markers(soup)
+    remove_visibility_warning_lines(soup)
+    remove_poll_personal_markers(soup)
     reveal_folded_comments(soup)
     if filter_correct_answers:
         remove_correct_answer_lines(soup)

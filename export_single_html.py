@@ -43,6 +43,16 @@ DECORATION_CLASSES = {
     "upload-icon",
     "remove-img",
 }
+VISIBILITY_WARNING_MARKERS = (
+    "含有违规或引发不良讨论的内容，内容仅自己可见，请勿发布同类信息",
+    "含有违规或引发不良讨论的内容, 内容仅自己可见, 请勿发布同类信息",
+)
+POLL_SELECTED_MARKERS = (
+    "（已选）",
+    "(已选)",
+    "（我已选）",
+    "(我已选)",
+)
 
 
 try:
@@ -265,6 +275,31 @@ img.pil {
   margin: 12px 0 18px !important;
   object-fit: contain !important;
 }
+.douban-archive-poll,
+[class*="poll"]:not(.comment-vote),
+[class*="vote"]:not(.comment-vote):not(.lnk-reaction) {
+  max-width: 720px;
+  margin: 20px 0;
+  padding: 16px 18px;
+  border: 1px solid #e0ded6;
+  border-left: 4px solid #7a946b;
+  border-radius: 6px;
+  background: #f8f8f4;
+}
+.douban-archive-poll-title {
+  margin: 0 0 10px;
+  color: #5f7656;
+  font-size: 14px;
+  font-weight: 700;
+}
+.douban-archive-poll button,
+.douban-archive-poll input[type="radio"],
+.douban-archive-poll input[type="checkbox"],
+[class*="poll"] button,
+[class*="poll"] input[type="radio"],
+[class*="poll"] input[type="checkbox"] {
+  display: none !important;
+}
 .clear,
 .clearfix::after {
   display: none;
@@ -273,28 +308,85 @@ img.pil {
   display: none !important;
 }
 @media (max-width: 720px) {
+  html {
+    background: #fff;
+  }
   body {
-    padding: 0 18px 42px;
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: 0 16px 42px;
+    overflow-x: hidden;
   }
   #topic-content.topic-content,
   .comment-item {
     grid-template-columns: 42px minmax(0, 1fr);
-    column-gap: 12px;
+    column-gap: 10px;
+    width: 100%;
   }
   .user-face,
   .avatar {
-    width: 42px;
+    width: 38px;
   }
   .user-face img,
   .avatar img,
   img.pil {
-    width: 36px !important;
-    height: 36px !important;
-    max-width: 36px !important;
-    max-height: 36px !important;
+    width: 34px !important;
+    height: 34px !important;
+    max-width: 34px !important;
+    max-height: 34px !important;
+  }
+  .comment-item > .reply-doc,
+  #topic-content.topic-content > .topic-doc {
+    display: contents;
+  }
+  .comment-item .bg-img-green,
+  #topic-content.topic-content .topic-meta,
+  #topic-content.topic-content h3,
+  #topic-content.topic-content h4 {
+    grid-column: 2;
+    min-width: 0;
+  }
+  .comment-item .reply-content,
+  .comment-item .markdown,
+  .comment-item .comment-photos,
+  #topic-content.topic-content .topic-richtext,
+  #topic-content.topic-content .rich-content,
+  #topic-content.topic-content .markdown,
+  #topic-content.topic-content .douban-archive-poll {
+    grid-column: 1 / -1;
+  }
+  .reply-content,
+  .topic-richtext {
+    font-size: 16px;
+    line-height: 1.72;
+  }
+  .markdown blockquote,
+  .reply-quote,
+  .ref-comment,
+  blockquote {
+    margin-left: 0;
+    margin-right: 0;
+    padding: 9px 12px;
+  }
+  .douban-archive-poll,
+  [class*="poll"]:not(.comment-vote),
+  [class*="vote"]:not(.comment-vote):not(.lnk-reaction) {
+    max-width: 100%;
+    margin: 16px 0;
+    padding: 12px 14px;
+  }
+  img,
+  .topic-richtext img,
+  .reply-content img,
+  .markdown img,
+  .content img:not(.pil),
+  .cmt-img img,
+  .comment-photos img {
+    max-width: 100% !important;
   }
   h1 {
-    font-size: 22px;
+    font-size: 21px;
   }
   h3 .from a,
   h4 > a:first-child,
@@ -662,6 +754,82 @@ def remove_douban_people_links(soup):
             link.unwrap()
 
 
+def remove_visibility_warning_lines(soup):
+    block_tags = {"p", "div", "li", "span", "td", "blockquote"}
+
+    for text_node in list(soup.find_all(string=lambda text: text and any(marker in text for marker in VISIBILITY_WARNING_MARKERS))):
+        parent = text_node.parent
+        if not parent or parent.name in ("script", "style", "noscript"):
+            continue
+
+        original_text = str(text_node)
+        kept_lines = [
+            line for line in original_text.splitlines()
+            if not any(marker in line for marker in VISIBILITY_WARNING_MARKERS)
+        ]
+
+        if not kept_lines:
+            if parent.name in block_tags and parent.get_text(strip=True) == original_text.strip():
+                parent.decompose()
+            else:
+                text_node.extract()
+            continue
+
+        text_node.replace_with("\n".join(kept_lines))
+
+
+def normalize_poll_blocks(soup):
+    for text_node in list(soup.find_all(string=lambda text: text and any(marker in text for marker in POLL_SELECTED_MARKERS))):
+        cleaned = str(text_node)
+        for marker in POLL_SELECTED_MARKERS:
+            cleaned = cleaned.replace(marker, "")
+        text_node.replace_with(cleaned)
+
+    for tag in list(soup.find_all(["button", "input", "a", "span"])):
+        text = tag.get_text(" ", strip=True)
+        value = tag.get("value", "")
+        classes = set(tag.get("class") or [])
+        if text in {"已投票", "投票", "提交投票", "我要投票"} or value in {"已投票", "投票", "提交投票", "我要投票"}:
+            tag.decompose()
+            continue
+        if classes & {"selected", "is-selected", "checked", "is-checked", "voted"}:
+            tag["class"] = [cls for cls in tag.get("class", []) if cls not in {"selected", "is-selected", "checked", "is-checked", "voted"}]
+
+    poll_candidates = []
+    for text_node in soup.find_all(string=lambda text: text and ("人参与" in text or "已投票" in text or "（单选）" in text or "（多选）" in text or "(单选)" in text or "(多选)" in text)):
+        parent = text_node.parent
+        if not parent or parent.name in ("script", "style", "noscript"):
+            continue
+
+        candidate = None
+        for ancestor in [parent] + list(parent.parents):
+            if not getattr(ancestor, "name", None) or ancestor.name in ("body", "html"):
+                break
+            marker = " ".join(
+                str(value) for key, value in ancestor.attrs.items()
+                if key in ("id", "class", "data-type")
+            ).lower()
+            text = ancestor.get_text(" ", strip=True)
+            if ("poll" in marker or "vote" in marker or ("人参与" in text and ("单选" in text or "多选" in text))) and len(text) < 2500:
+                candidate = ancestor
+                break
+
+        if candidate and candidate not in poll_candidates:
+            poll_candidates.append(candidate)
+
+    for poll in poll_candidates:
+        classes = poll.get("class") or []
+        if "douban-archive-poll" not in classes:
+            poll["class"] = classes + ["douban-archive-poll"]
+
+        existing_title = poll.select_one(".douban-archive-poll-title")
+        if not existing_title:
+            title = soup.new_tag("div")
+            title["class"] = "douban-archive-poll-title"
+            title.string = "投票结果"
+            poll.insert(0, title)
+
+
 def normalize_archive_layout(soup):
     for quote in soup.select(".reply-quote-content"):
         short_content = quote.select_one(".short.ref-content")
@@ -826,6 +994,8 @@ def export_html(html_path, output_path, fetch_missing=False):
     remove_remote_dependencies(soup)
     remove_douban_chrome_and_actions(soup)
     remove_douban_people_links(soup)
+    remove_visibility_warning_lines(soup)
+    normalize_poll_blocks(soup)
     normalize_archive_layout(soup)
     embedded, recovered_remote, fetched_remote, skipped_decoration, missing_local = embed_images(
         soup,
